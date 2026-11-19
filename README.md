@@ -23,6 +23,13 @@ Demo logins (password `password123`): `pharmacy@maa.test`, `supplier@maa.test`,
 
 Needs Node.js 22.5 or newer (it uses the built-in `node:sqlite`, so there are no native dependencies).
 
+### Single-file HTML demo
+
+`standalone/maa-demo.html` is the whole app in one HTML file that runs with no server: open it in any
+browser and use the demo buttons to switch between pharmacy, supplier, driver and admin. Data is kept in
+that browser only. It is rebuilt from `public/` with `npm run build:demo`, using an in-browser copy of the
+API (`standalone/mock-api.js`). Use it for demos, not real orders.
+
 ### Configuration (environment variables)
 
 | Variable | Default | |
