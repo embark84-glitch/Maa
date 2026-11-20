@@ -248,3 +248,50 @@ aside .score-big { margin-bottom: 1rem; }
 #toast div.err { background: #b42318; }
 
 .foot { text-align: center; color: var(--muted); font-size: .8rem; padding: 2rem 1rem; }
+
+/* ---------- Phones & touch ---------- */
+/* Grid tracks may shrink below their content, so wide tables never stretch the page. */
+.wizard > *, .detail-grid > *, .grid > * { min-width: 0; }
+@media (max-width: 760px) {
+  .g2, .g3, .g4 { grid-template-columns: minmax(0, 1fr); }
+  .wizard, .detail-grid { grid-template-columns: minmax(0, 1fr); }
+  /* 16px stops iOS Safari zooming in when a field is focused. */
+  input, select, textarea { font-size: 16px !important; }
+  h1 { font-size: 1.35rem; }
+  .card { padding: 1rem; }
+  .page-head { align-items: flex-start; }
+  .page-head > .btn, .page-head > button { width: 100%; justify-content: center; }
+  .wizard-foot button { flex: 1; justify-content: center; }
+  .filters { grid-template-columns: 1fr; }
+  .detail-grid aside { order: -1; }   /* score & actions first on phones */
+  .tabs { flex-wrap: nowrap; overflow-x: auto; }
+  .tabs button { white-space: nowrap; }
+
+  /* Tables marked .cards become one card per row, each cell labelled with its column. */
+  table.cards, table.cards tbody, table.cards tr, table.cards td { display: block; width: 100%; }
+  table.cards thead { display: none; }
+  table.cards tr { border: 1px solid var(--border); border-radius: 8px; padding: .5rem .75rem; margin-bottom: .6rem; background: var(--surface); }
+  table.cards td { border: none; padding: .3rem 0; text-align: left; white-space: normal; }
+  table.cards td[data-label]::before { content: attr(data-label); display: block; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
+  table.cards td:empty { display: none; }
+  table.cards td:first-child::before { display: none; }
+  table.cards td:first-child { font-size: 1rem; }
+  .ref-table.cards input, .ref-table.cards select { min-width: 0; }
+  .ref-table.cards td:first-child::before { display: block; }
+  .ref-table.cards td:last-child { text-align: right; }
+}
+@media (pointer: coarse) {
+  button, .btn { min-height: 44px; }
+  .btn-sm { min-height: 38px; padding: .35rem .8rem; }
+  .btn-link { min-height: 0; }
+  input[type=checkbox] { width: 22px; height: 22px; }
+  .check { padding: .3rem 0; }
+  .check input { margin-top: 0; }
+  .topnav a { padding: .55rem .8rem; }
+  .kpi { min-height: 44px; }
+}
+@media (max-width: 760px) {
+  table.cards:not(.ref-table) tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .15rem .75rem; }
+  table.cards:not(.ref-table) td:first-child { grid-column: 1 / -1; }
+  table.cards td { width: auto; }
+}

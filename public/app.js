@@ -203,7 +203,7 @@ function secExperience(p) {
     ${field(p, 'experience.yearsPower', 'Years of experience in Power', { type: 'number' })}
   </div>
   <h3 class="section-title">Major project references (last 5–10 years)</h3>
-  <div class="table-wrap"><table class="ref-table"><thead><tr><th>Client / end user</th><th>Project</th><th>Scope supplied / executed</th><th>Sector</th><th>Value (USD)</th><th>Year</th><th></th></tr></thead>
+  <div class="table-wrap"><table class="ref-table cards"><thead><tr><th>Client / end user</th><th>Project</th><th>Scope supplied / executed</th><th>Sector</th><th>Value (USD)</th><th>Year</th><th></th></tr></thead>
   <tbody id="refs">${refs.map((r, i) => refRow(r, i, sectorOpts)).join('')}</tbody></table></div>
   <button type="button" class="btn-sm" data-action="add-ref">+ Add reference</button>
   <h3 class="section-title">Resources & capacity</h3>
@@ -268,7 +268,7 @@ function documentsPanel(app, { editable, canUpload }) {
       <div class="span2 row"><div class="spacer"></div><button class="btn-primary" type="submit">Upload</button></div>
     </div></form>` : '';
   return `${upload}<div class="card"><div class="card-head"><h3>Document register</h3><span class="muted small">* mandatory for ${esc(m.vendorTypes[type])}</span></div>
-    <div class="table-wrap"><table><thead><tr><th>Document</th><th>Status</th><th>Files</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+    <div class="table-wrap"><table class="cards"><thead><tr><th>Document</th><th>Status</th><th>Files</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
 // ---------------------------------------------------------------- Shell
@@ -287,9 +287,19 @@ function shell(content, active) {
   </header><main>${content}</main><div class="foot">PROMERGON · Oil & Gas and Power EPC · Supplier & subcontractor prequalification</div>`;
 }
 
+// On phones, .cards tables are shown as stacked cards; each cell shows its column name.
+function labelTables(root = document) {
+  for (const t of $$('table.cards', root)) {
+    const heads = $$('thead th', t).map((th) => th.textContent.trim());
+    for (const tr of $$('tbody tr', t)) [...tr.cells].forEach((td, i) => { if (heads[i]) td.dataset.label = heads[i]; });
+  }
+}
+
 function render(html) {
   $('#app').innerHTML = html;
   paintBars();
+  labelTables();
+  $('.steps button.active')?.scrollIntoView({ block: 'nearest', inline: 'center' });
   window.scrollTo(0, 0);
 }
 
@@ -459,11 +469,11 @@ async function viewDashboard() {
     </div>
     <div class="grid g2">
       <div class="card"><div class="card-head"><h3>Review queue</h3><a href="#/vendors">All applications →</a></div>
-        ${d.queue.length ? `<div class="table-wrap"><table><thead><tr><th>Company</th><th>Type</th><th>Status</th><th class="num">Score</th><th>Submitted</th></tr></thead><tbody>
+        ${d.queue.length ? `<div class="table-wrap"><table class="cards"><thead><tr><th>Company</th><th>Type</th><th>Status</th><th class="num">Score</th><th>Submitted</th></tr></thead><tbody>
         ${d.queue.map((v) => `<tr class="clickable" data-href="#/vendors/${v.id}"><td>${esc(v.company_name)}</td><td>${esc(m.vendorTypes[v.vendor_type])}</td><td>${chip(v.status)}</td><td class="num">${v.auto_score ?? '—'} ${grade(v.grade)}</td><td>${fmtDate(v.submitted_at)}</td></tr>`).join('')}
         </tbody></table></div>` : '<div class="empty">No applications waiting for review.</div>'}</div>
       <div class="card"><div class="card-head"><h3>Expiring / expired documents (60 days)</h3></div>
-        ${d.expiringDocs.length ? `<div class="table-wrap"><table><thead><tr><th>Vendor</th><th>Document</th><th>Expiry</th></tr></thead><tbody>
+        ${d.expiringDocs.length ? `<div class="table-wrap"><table class="cards"><thead><tr><th>Vendor</th><th>Document</th><th>Expiry</th></tr></thead><tbody>
         ${d.expiringDocs.map((x) => `<tr class="clickable" data-href="#/vendors/${x.vendor_id}"><td>${esc(x.company_name)}<div class="hint">${esc(x.vendor_code)}</div></td><td>${esc(m.documentTypes[x.doc_type]?.name)}</td><td><span class="chip ${x.expired ? 'bad' : 'warn'}">${fmtDate(x.expiry_date)}</span></td></tr>`).join('')}
         </tbody></table></div>` : '<div class="empty">No approved-vendor documents expiring soon.</div>'}</div>
       <div class="card"><div class="card-head"><h3>Requalification due (90 days)</h3></div>
@@ -493,7 +503,7 @@ async function viewVendors(params) {
       <select name="sector" aria-label="Sector"><option value="">All sectors</option>${opt(Object.fromEntries(Object.entries(m.sectors).map(([k, l]) => [k, l.split('(')[0]])), params.sector)}</select>
       <select name="category" aria-label="Category"><option value="">All categories</option>${opt(Object.fromEntries(m.categories.map((c) => [c.code, `${c.code} – ${c.name}`])), params.category)}</select>
     </form>
-    <div class="card">${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Company</th><th>Type</th><th>Country</th><th>Categories</th><th>Status</th><th class="num">Auto score</th><th>Updated</th></tr></thead><tbody>
+    <div class="card">${rows.length ? `<div class="table-wrap"><table class="cards"><thead><tr><th>Company</th><th>Type</th><th>Country</th><th>Categories</th><th>Status</th><th class="num">Auto score</th><th>Updated</th></tr></thead><tbody>
       ${rows.map((v) => `<tr class="clickable" data-href="#/vendors/${v.id}"><td><strong>${esc(v.company_name)}</strong>${v.vendor_code ? `<div class="hint">${esc(v.vendor_code)}</div>` : ''}</td>
       <td>${esc(m.vendorTypes[v.vendor_type])}</td><td>${esc(v.country || '—')}</td>
       <td class="small">${v.categories.slice(0, 4).map(esc).join(', ')}${v.categories.length > 4 ? ` +${v.categories.length - 4}` : ''}</td>
@@ -603,7 +613,7 @@ async function viewAvl() {
   render(shell(`
     <div class="page-head"><div><h1>Approved Vendor List</h1><p class="muted">${rows.length} approved supplier(s) & subcontractor(s)</p></div>
     <a class="btn btn-primary" href="/api/staff/avl.csv">Download CSV</a></div>
-    <div class="card">${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Vendor code</th><th>Company</th><th>Type</th><th>Categories</th><th>Status</th><th>Grade</th><th>Contact</th><th>Requalify by</th></tr></thead><tbody>
+    <div class="card">${rows.length ? `<div class="table-wrap"><table class="cards"><thead><tr><th>Vendor code</th><th>Company</th><th>Type</th><th>Categories</th><th>Status</th><th>Grade</th><th>Contact</th><th>Requalify by</th></tr></thead><tbody>
     ${rows.map((v) => `<tr class="clickable" data-href="#/vendors/${v.id}"><td><strong>${esc(v.vendor_code)}</strong></td><td>${esc(v.company_name)}<div class="hint">${esc(v.country || '')}</div></td><td>${esc(m.vendorTypes[v.vendor_type])}</td>
       <td class="small">${v.categories.map(esc).join(', ')}</td><td>${chip(v.status)}</td><td>${grade(v.grade)}</td>
       <td class="small">${esc(v.contact.name || '')}<br>${esc(v.contact.email || '')}</td><td>${fmtDate(v.approval_expires_at)}</td></tr>`).join('')}
@@ -624,7 +634,7 @@ async function viewUsers() {
       <div class="span2"><label for="nu_pw">Temporary password</label><input id="nu_pw" type="text" name="password" required minlength="10" autocomplete="off"></div>
       <div class="span2 row"><div class="spacer"></div><button class="btn-primary" type="submit">Create user</button></div>
     </div></form>
-    <div class="card"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Company</th><th>Status</th><th></th></tr></thead><tbody>
+    <div class="card"><div class="table-wrap"><table class="cards"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Company</th><th>Status</th><th></th></tr></thead><tbody>
     ${users.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.email)}</td><td>${esc(m.roles[x.role])}${x.discipline ? `<div class="hint">${esc(m.disciplines[x.discipline])}</div>` : ''}</td><td>${esc(x.company_name || 'PROMERGON')}</td>
       <td>${x.active ? '<span class="chip ok">Active</span>' : '<span class="chip bad">Disabled</span>'}</td>
       <td>${x.id !== state.user.id ? `<button type="button" class="btn-sm" data-action="toggle-user" data-id="${x.id}" data-active="${x.active ? 0 : 1}">${x.active ? 'Disable' : 'Enable'}</button>` : ''}</td></tr>`).join('')}
@@ -699,6 +709,7 @@ document.addEventListener('click', async (ev) => {
     const i = tbody.rows.length ? Math.max(...$$('input[name$=".client"]', tbody).map((x) => Number(x.name.split('.')[2]))) + 1 : 0;
     const sectorOpts = () => `<option value="">—</option>` + Object.entries(state.meta.sectors).map(([k, l]) => `<option value="${k}">${esc(l.split('(')[0])}</option>`).join('');
     tbody.insertAdjacentHTML('beforeend', refRow({}, i, sectorOpts));
+    labelTables(tbody.closest('.table-wrap'));
   } else if (a === 'del-ref') {
     el.closest('tr').remove();
     if (state.app?.profile?.experience) state.app.profile.experience.references = [];
