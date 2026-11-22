@@ -7,7 +7,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const state = {
   token: localGet('maa.token'),
   user: null,
-  config: { currency: 'USD', deliveryFee: 0 },
+  config: { currency: 'LYD', deliveryFee: 0 },
   cart: JSON.parse(localGet('maa.cart') || '{}'), // productId -> { product, qty }
   refreshTimer: null,
 };
@@ -16,7 +16,7 @@ function localGet(k) { try { return localStorage.getItem(k); } catch { return nu
 function localSet(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { /* private mode */ } }
 const saveCart = () => localSet('maa.cart', JSON.stringify(state.cart));
 
-const money = (minor) => new Intl.NumberFormat(undefined, { style: 'currency', currency: state.config.currency }).format((minor || 0) / 100);
+const money = (minor) => new Intl.NumberFormat(undefined, { style: 'currency', currency: state.config.currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format((minor || 0) / 100);
 const when = (iso) => new Date(iso.replace(' ', 'T') + 'Z').toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
 const STATUS_LABEL = {
@@ -57,24 +57,27 @@ function action(fn) {
 function logout() {
   state.token = null; state.user = null; state.cart = {};
   localSet('maa.token', null); saveCart();
-  location.hash = '#/login';
+  location.hash = '#login';
   render();
 }
 
 // ---------------------------------------------------------------- routing
 
 const NAV = {
-  pharmacy: [['#/catalog', 'Catalog'], ['#/cart', 'Cart'], ['#/orders', 'My orders']],
-  supplier: [['#/incoming', 'Orders'], ['#/products', 'My products']],
-  driver: [['#/jobs', 'Available jobs'], ['#/my-deliveries', 'My deliveries']],
-  admin: [['#/admin', 'Verification'], ['#/orders', 'All orders']],
+  pharmacy: [['#catalog', 'Catalog'], ['#cart', 'Cart'], ['#orders', 'My orders']],
+  supplier: [['#incoming', 'Orders'], ['#products', 'My products']],
+  driver: [['#jobs', 'Available jobs'], ['#my-deliveries', 'My deliveries']],
+  admin: [['#admin', 'Verification'], ['#orders', 'All orders']],
 };
-const HOME = { pharmacy: '#/catalog', supplier: '#/incoming', driver: '#/jobs', admin: '#/admin' };
+const HOME = { pharmacy: '#catalog', supplier: '#incoming', driver: '#jobs', admin: '#admin' };
 
 async function render() {
   clearInterval(state.refreshTimer);
   const view = $('#view');
-  const [route, param] = location.hash.replace(/^#\//, '').split('/');
+  // Routes are plain '#name' or '#order-12' so they survive being shared as a link.
+  const h = location.hash.replace(/^#\/?/, '');
+  const m = h.match(/^order-(\d+)$/);
+  const [route, param] = m ? ['order', m[1]] : [h, undefined];
 
   if (!state.user) {
     $('#nav').innerHTML = ''; $('#who').innerHTML = '';
@@ -84,7 +87,7 @@ async function render() {
   const u = state.user;
   const cartCount = Object.keys(state.cart).length;
   $('#nav').innerHTML = (NAV[u.role] || []).map(([href, label]) =>
-    `<a href="${href}" class="${location.hash.startsWith(href) ? 'active' : ''}">${label}${href === '#/cart' && cartCount ? `<span class="cart-badge">${cartCount}</span>` : ''}</a>`).join('');
+    `<a href="${href}" class="${(location.hash === href || (href === '#orders' && /^#order-/.test(location.hash))) ? 'active' : ''}">${label}${href === '#cart' && cartCount ? `<span class="cart-badge">${cartCount}</span>` : ''}</a>`).join('');
   $('#who').innerHTML = `<span class="name muted">${esc(u.organization?.name || u.name)}</span><button class="link" id="logout">Log out</button>`;
   $('#logout').onclick = logout;
 
@@ -129,7 +132,7 @@ function renderLogin(view) {
           <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
           <button class="primary" type="submit">Sign in</button>
         </form>
-        <p class="small muted">New pharmacy, supplier company or driver? <a href="#/register">Create an account</a></p>
+        <p class="small muted">New pharmacy, supplier company or driver? <a href="#register">Create an account</a></p>
       </div>
       <div class="card stack demo">
         <h2>Demo accounts</h2>
@@ -173,7 +176,7 @@ function renderRegister(view) {
         <p class="small muted">Licenses are checked by Maa before you can buy or sell.</p>
         <button class="primary" type="submit">Create account</button>
       </form>
-      <p class="small"><a href="#/login">Back to sign in</a></p>
+      <p class="small"><a href="#login">Back to sign in</a></p>
     </div>`;
   const f = $('#f', view);
   const sync = () => {
@@ -276,7 +279,7 @@ function productCard(p) {
 function renderCart(view) {
   const lines = Object.values(state.cart);
   if (!lines.length) {
-    view.innerHTML = '<h1>Cart</h1><div class="card empty">Your cart is empty. <a href="#/catalog">Browse the catalog</a></div>';
+    view.innerHTML = '<h1>Cart</h1><div class="card empty">Your cart is empty. <a href="#catalog">Browse the catalog</a></div>';
     return;
   }
   const groups = {};
@@ -338,7 +341,7 @@ function renderCart(view) {
     });
     state.cart = {}; saveCart();
     toast(`${orders.length} order${orders.length > 1 ? 's' : ''} placed`);
-    location.hash = orders.length === 1 ? `#/order/${orders[0].id}` : '#/orders';
+    location.hash = orders.length === 1 ? `#order-${orders[0].id}` : '#orders';
   });
 }
 
@@ -375,14 +378,14 @@ async function renderOrders(view) {
   view.querySelectorAll('[data-tab]').forEach((b) => {
     b.onclick = () => { renderOrders.tab = { ...renderOrders.tab, [role]: Number(b.dataset.tab) }; render(); };
   });
-  view.querySelectorAll('[data-id]').forEach((tr) => { tr.onclick = () => { location.hash = `#/order/${tr.dataset.id}`; }; });
+  view.querySelectorAll('[data-id]').forEach((tr) => { tr.onclick = () => { location.hash = `#order-${tr.dataset.id}`; }; });
   state.refreshTimer = setInterval(() => { if (!document.hidden) render(); }, 20000);
 }
 
 async function renderOrderDetail(view, id) {
   const { order: o } = await api('GET', `/api/orders/${encodeURIComponent(id)}`);
   const role = state.user.role;
-  const backHref = { pharmacy: '#/orders', supplier: '#/incoming', driver: o.driver_id ? '#/my-deliveries' : '#/jobs', admin: '#/orders' }[role];
+  const backHref = { pharmacy: '#orders', supplier: '#incoming', driver: o.driver_id ? '#my-deliveries' : '#jobs', admin: '#orders' }[role];
 
   const actions = [];
   if (role === 'supplier') {
@@ -455,20 +458,36 @@ async function renderOrderDetail(view, id) {
     </div>`;
 
   const ORDER_ACTIONS = { accept: 'orders', reject: 'orders', ready: 'orders', cancel: 'orders', claim: 'deliveries', pickup: 'deliveries', release: 'deliveries' };
+  const send = async (act, body = {}) => {
+    await api('POST', `/api/${ORDER_ACTIONS[act]}/${o.id}/${act}`, body);
+    toast('Updated');
+    if (act === 'release') location.hash = '#jobs'; else render();
+  };
   view.querySelectorAll('[data-act]').forEach((b) => {
-    b.onclick = action(async () => {
-      const act = b.dataset.act;
-      let body = {};
-      if (act === 'reject' || act === 'cancel') {
-        const reason = prompt(act === 'reject' ? 'Reason for rejecting (shown to the pharmacy):' : 'Reason for cancelling (optional):');
-        if (reason === null) return;
-        if (act === 'reject' && !reason.trim()) return toast('A reason is required', true);
-        body = { reason: reason.trim() || undefined };
-      }
-      await api('POST', `/api/${ORDER_ACTIONS[act]}/${o.id}/${act}`, body);
-      toast('Updated');
-      if (act === 'release') location.hash = '#/jobs'; else render();
-    });
+    const act = b.dataset.act;
+    if (act !== 'reject' && act !== 'cancel') { b.onclick = action(() => send(act)); return; }
+    // Reject/cancel ask for a reason in the page itself (browser pop-ups are not reliable everywhere).
+    b.onclick = () => {
+      const bar = b.closest('.card');
+      const required = act === 'reject';
+      bar.innerHTML = `
+        <form id="reasonForm" class="stack" style="width:100%">
+          <label>${required ? 'Reason for rejecting (shown to the pharmacy)' : 'Reason for cancelling (optional)'}
+            <input id="reason" maxlength="300" ${required ? 'required' : ''}></label>
+          <div class="row">
+            <button class="danger" type="submit">${required ? 'Reject order' : 'Cancel order'}</button>
+            <button type="button" id="keep">Go back</button>
+          </div>
+        </form>`;
+      $('#reason', bar).focus();
+      $('#keep', bar).onclick = () => render();
+      const f = $('#reasonForm', bar);
+      f.onsubmit = action(async (ev) => {
+        ev.preventDefault();
+        const reason = $('#reason', bar).value.trim();
+        await send(act, { reason: reason || undefined });
+      });
+    };
   });
   const df = $('#deliver', view);
   if (df) {
@@ -565,13 +584,13 @@ async function renderJobs(view) {
         <div><span class="muted">Drop off</span><br><strong>${esc(j.pharmacy_name)}</strong><br>${esc(j.delivery_address)}</div>
         <div class="row">${j.item_count} product${j.item_count === 1 ? '' : 's'} ${j.cold_chain ? '<span class="tag cold">Cold chain</span>' : ''}
           ${j.payment_method === 'cash_on_delivery' ? `<span class="tag">Collect ${money(j.total)}</span>` : ''}</div>
-        <div class="row"><button class="primary" data-claim="${j.id}">Take job</button><a href="#/order/${j.id}">Details</a></div>
+        <div class="row"><button class="primary" data-claim="${j.id}">Take job</button><a href="#order-${j.id}">Details</a></div>
       </div>`).join('')}</div>` : '<div class="card empty">No deliveries waiting right now. This page refreshes automatically.</div>'}`;
   view.querySelectorAll('[data-claim]').forEach((b) => {
     b.onclick = action(async () => {
       await api('POST', `/api/deliveries/${b.dataset.claim}/claim`);
       toast('Job is yours. Head to the supplier.');
-      location.hash = `#/order/${b.dataset.claim}`;
+      location.hash = `#order-${b.dataset.claim}`;
     });
   });
   state.refreshTimer = setInterval(() => { if (!document.hidden) render(); }, 15000);

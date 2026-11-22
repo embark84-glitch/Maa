@@ -6,35 +6,35 @@
  */
 (function () {
   const KEY = 'maa.demo.db';
-  const CONFIG = { currency: 'USD', deliveryFee: 500 };
+  const CONFIG = { currency: 'LYD', deliveryFee: 1000 };
   const ACTIVE = ['placed', 'accepted', 'ready_for_pickup', 'assigned', 'picked_up'];
 
   function fresh() {
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
     const orgs = [
-      { id: 1, type: 'pharmacy', name: 'Al Shifa Pharmacy', license_no: 'PH-10293', address: '12 Market Street', city: 'Downtown', phone: '+100000001', verified: true, created_at: now },
-      { id: 2, type: 'supplier', name: 'Nile Pharma Distribution', license_no: 'SUP-5521', address: 'Industrial Zone, Block 4', city: 'East City', phone: '+200000001', verified: true, created_at: now },
-      { id: 3, type: 'supplier', name: 'MedLine Healthcare Co.', license_no: 'SUP-7780', address: '88 Logistics Park', city: 'North City', phone: '+200000002', verified: true, created_at: now },
+      { id: 1, type: 'pharmacy', name: 'Al Shifa Pharmacy', license_no: 'PH-10293', address: 'Omar Al-Mukhtar Street', city: 'Tripoli', phone: '+218 91 000 0001', verified: true, created_at: now },
+      { id: 2, type: 'supplier', name: 'Al Wadi Medical Supplies', license_no: 'SUP-5521', address: 'Gergarish Road, Warehouse 7', city: 'Tripoli', phone: '+218 92 000 0001', verified: true, created_at: now },
+      { id: 3, type: 'supplier', name: 'Sahara Pharma Distribution', license_no: 'SUP-7780', address: 'Free Zone, Block 12', city: 'Misrata', phone: '+218 92 000 0002', verified: true, created_at: now },
     ];
     const u = (id, name, email, role, org_id, phone, vehicle = null) => ({ id, name, email, role, org_id, phone, vehicle, approved: true, password: 'password123', created_at: now });
     const users = [
-      u(1, 'Platform Admin', 'admin@maa.test', 'admin', null, '+000000000'),
-      u(2, 'Sara (Pharmacist)', 'pharmacy@maa.test', 'pharmacy', 1, '+100000001'),
-      u(3, 'Omar (Nile Pharma)', 'supplier@maa.test', 'supplier', 2, '+200000001'),
-      u(4, 'Lina (MedLine)', 'supplier2@maa.test', 'supplier', 3, '+200000002'),
-      u(5, 'Youssef (Driver)', 'driver@maa.test', 'driver', null, '+300000001', 'Motorbike'),
+      u(1, 'Platform Admin', 'admin@maa.test', 'admin', null, '+218 21 000 0000'),
+      u(2, 'Sara (Pharmacist)', 'pharmacy@maa.test', 'pharmacy', 1, '+218 91 000 0001'),
+      u(3, 'Omar (Al Wadi)', 'supplier@maa.test', 'supplier', 2, '+218 92 000 0001'),
+      u(4, 'Lina (Sahara Pharma)', 'supplier2@maa.test', 'supplier', 3, '+218 92 000 0002'),
+      u(5, 'Youssef (Driver)', 'driver@maa.test', 'driver', null, '+218 94 000 0001', 'Motorbike'),
     ];
     const rows = [
-      [2, 'Panadol', 'Paracetamol', 'Pain relief', 'Tablet', '500 mg', 'Box of 24', 'NP-PAN-500', 350, 1200, 10, false],
-      [2, 'Brufen', 'Ibuprofen', 'Pain relief', 'Tablet', '400 mg', 'Box of 30', 'NP-BRU-400', 520, 800, 5, false],
-      [2, 'Augmentin', 'Amoxicillin + Clavulanate', 'Antibiotics', 'Tablet', '1 g', 'Box of 14', 'NP-AUG-1G', 1450, 300, 2, false],
-      [2, 'Ventolin Inhaler', 'Salbutamol', 'Respiratory', 'Inhaler', '100 mcg', '200 doses', 'NP-VEN-100', 890, 150, 1, false],
-      [2, 'Glucophage', 'Metformin', 'Diabetes', 'Tablet', '850 mg', 'Box of 30', 'NP-GLU-850', 410, 600, 5, false],
-      [3, 'Lantus SoloStar', 'Insulin glargine', 'Diabetes', 'Pen', '100 IU/ml', '5 pens', 'ML-LAN-100', 6200, 60, 1, true],
-      [3, 'Concor', 'Bisoprolol', 'Cardio', 'Tablet', '5 mg', 'Box of 30', 'ML-CON-5', 640, 400, 3, false],
-      [3, 'Nexium', 'Esomeprazole', 'Gastro', 'Capsule', '40 mg', 'Box of 14', 'ML-NEX-40', 1180, 250, 2, false],
-      [3, 'Zyrtec', 'Cetirizine', 'Allergy', 'Tablet', '10 mg', 'Box of 20', 'ML-ZYR-10', 460, 500, 5, false],
-      [3, 'Panadol', 'Paracetamol', 'Pain relief', 'Tablet', '500 mg', 'Box of 24', 'ML-PAN-500', 340, 900, 10, false],
+      [2, 'Panadol', 'Paracetamol', 'Pain relief', 'Tablet', '500 mg', 'Box of 24', 'NP-PAN-500', 450, 1200, 10, false],
+      [2, 'Brufen', 'Ibuprofen', 'Pain relief', 'Tablet', '400 mg', 'Box of 30', 'NP-BRU-400', 675, 800, 5, false],
+      [2, 'Augmentin', 'Amoxicillin + Clavulanate', 'Antibiotics', 'Tablet', '1 g', 'Box of 14', 'NP-AUG-1G', 1800, 300, 2, false],
+      [2, 'Ventolin Inhaler', 'Salbutamol', 'Respiratory', 'Inhaler', '100 mcg', '200 doses', 'NP-VEN-100', 1250, 150, 1, false],
+      [2, 'Glucophage', 'Metformin', 'Diabetes', 'Tablet', '850 mg', 'Box of 30', 'NP-GLU-850', 525, 600, 5, false],
+      [3, 'Lantus SoloStar', 'Insulin glargine', 'Diabetes', 'Pen', '100 IU/ml', '5 pens', 'ML-LAN-100', 8500, 60, 1, true],
+      [3, 'Concor', 'Bisoprolol', 'Cardio', 'Tablet', '5 mg', 'Box of 30', 'ML-CON-5', 850, 400, 3, false],
+      [3, 'Nexium', 'Esomeprazole', 'Gastro', 'Capsule', '40 mg', 'Box of 14', 'ML-NEX-40', 1500, 250, 2, false],
+      [3, 'Zyrtec', 'Cetirizine', 'Allergy', 'Tablet', '10 mg', 'Box of 20', 'ML-ZYR-10', 600, 500, 5, false],
+      [3, 'Panadol', 'Paracetamol', 'Pain relief', 'Tablet', '500 mg', 'Box of 24', 'ML-PAN-500', 425, 900, 10, false],
     ];
     const products = rows.map((r, i) => ({
       id: i + 1, supplier_id: r[0], name: r[1], generic_name: r[2], category: r[3], form: r[4], strength: r[5],

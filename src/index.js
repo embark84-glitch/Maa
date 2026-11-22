@@ -21,8 +21,8 @@ const db = openDb(DB_FILE);
 const app = createApp({
   db,
   secret,
-  currency: process.env.CURRENCY || 'USD',
-  deliveryFee: Math.round(Number(process.env.DELIVERY_FEE ?? 5) * 100),
+  currency: process.env.CURRENCY || 'LYD',
+  deliveryFee: Math.round(Number(process.env.DELIVERY_FEE ?? 10) * 100),
 });
 
 app.listen(PORT, () => console.log(`Maa running on http://localhost:${PORT}`));

@@ -8,7 +8,8 @@ const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
 const safe = (js) => js.replace(/<\/script/gi, '<\\/script');
 
 const css = read('public/styles.css') + `
-.demo-bar { background: var(--brand-soft); color: var(--text); font-size: .85rem; padding: .45rem 16px;
+.demo-bar { background: var(--brand-soft); color: var(--text); font-size: .85rem; padding-block: .45rem;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
   display: flex; gap: .75rem; align-items: center; justify-content: center; flex-wrap: wrap; text-align: center; }
 .demo-bar button { font-size: .8rem; padding: .2rem .6rem; }`;
 
@@ -26,3 +27,14 @@ let html = read('public/index.html')
 const out = path.join(__dirname, 'maa-demo.html');
 fs.writeFileSync(out, html);
 console.log(`Wrote ${path.relative(root, out)} (${(html.length / 1024).toFixed(0)} KB)`);
+
+// Optional second output: the same page as a body fragment (no <html>/<head>/<body>),
+// for hosts that wrap the page in their own document skeleton.
+if (process.argv[2]) {
+  const head = html.match(/<head>([\s\S]*?)<\/head>/)[1]
+    .replace(/<meta charset[^>]*>\s*/, '')
+    .replace(/<meta name="viewport"[^>]*>\s*/, '<meta name="claude:viewport-fit-sides" content="cover">\n  ');
+  const body = html.match(/<body>([\s\S]*?)<\/body>/)[1];
+  fs.writeFileSync(process.argv[2], `${head.trim()}\n${body.trim()}\n`);
+  console.log(`Wrote fragment ${process.argv[2]}`);
+}

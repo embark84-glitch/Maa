@@ -37,8 +37,8 @@ API (`standalone/mock-api.js`). Use it for demos, not real orders.
 | `PORT` | `3000` | |
 | `DB_FILE` | `data/maa.db` | SQLite file |
 | `AUTH_SECRET` | random per start | **Required** when `NODE_ENV=production` |
-| `CURRENCY` | `USD` | ISO code used for display |
-| `DELIVERY_FEE` | `5` | Flat fee per shipment, in major units |
+| `CURRENCY` | `LYD` | ISO code used for display |
+| `DELIVERY_FEE` | `10` | Flat fee per shipment, in major units |
 
 ## How an order flows
 

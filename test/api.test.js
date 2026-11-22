@@ -44,7 +44,7 @@ test('full journey: order from two companies, fulfil, deliver with code', async 
   assert.equal(placed.status, 201);
   assert.equal(placed.body.orders.length, 2, 'cart split into one order per supplier');
 
-  const o = placed.body.orders.find((x) => x.supplier_name === 'Nile Pharma Distribution');
+  const o = placed.body.orders.find((x) => x.supplier_name === 'Al Wadi Medical Supplies');
   assert.equal(o.status, 'placed');
   assert.equal(o.total, o.subtotal + 500);
   assert.match(o.delivery_code, /^\d{6}$/);
