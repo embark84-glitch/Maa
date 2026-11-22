@@ -286,6 +286,30 @@
     return out;
   }
 
+  // Read-only hooks for the demo guide in app.js: who to sign in as, and how far the current order has got.
+  const TERMINAL = ['delivered', 'rejected', 'cancelled'];
+  window.maaDemo = {
+    accounts: [
+      { email: 'pharmacy@maa.test', label: 'Pharmacy' },
+      { email: 'supplier@maa.test', label: 'Al Wadi (supplier)' },
+      { email: 'supplier2@maa.test', label: 'Sahara (supplier)' },
+      { email: 'driver@maa.test', label: 'Driver' },
+      { email: 'admin@maa.test', label: 'Admin' },
+    ],
+    password: 'password123',
+    progress() {
+      const shape = (o) => o && ({
+        id: o.id, status: o.status, code: o.delivery_code,
+        supplierEmail: db.users.find((u) => u.role === 'supplier' && u.org_id === o.supplier_id)?.email,
+      });
+      const active = db.orders.filter((o) => !TERMINAL.includes(o.status)).sort((a, b) => a.id - b.id)[0];
+      if (active) return { state: 'active', order: shape(active) };
+      const newest = [...db.orders].sort((a, b) => b.id - a.id)[0];
+      if (newest && newest.status === 'delivered') return { state: 'done', order: shape(newest) };
+      return { state: 'start', order: null };
+    },
+  };
+
   const compiled = routes.map(([m, p, h]) => [m, new RegExp('^' + p.replace(/:(\w+)/g, '(?<$1>[^/]+)') + '$'), h]);
   const realFetch = window.fetch.bind(window);
 

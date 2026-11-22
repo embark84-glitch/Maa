@@ -87,6 +87,7 @@ async function render() {
   const langBtn = `<button class="link" id="lang">${I18N.lang === 'ar' ? 'English' : 'العربية'}</button>`;
   const bindLang = () => { $('#lang').onclick = () => { I18N.setLang(I18N.lang === 'ar' ? 'en' : 'ar'); render(); }; };
 
+  renderGuide();
   if (!state.user) {
     $('#nav').innerHTML = ''; $('#who').innerHTML = langBtn; bindLang();
     return route === 'register' ? renderRegister(view) : renderLogin(view);
@@ -113,6 +114,7 @@ async function render() {
   if (!fn) { location.hash = HOME[u.role]; return; }
   view.innerHTML = `<p class="muted">${t('Loading…')}</p>`;
   try { await fn(view, param); } catch (e) { view.innerHTML = `<div class="card">${esc(e.message)}</div>`; }
+  highlightStep();
 }
 
 window.addEventListener('hashchange', render);
@@ -640,6 +642,99 @@ async function renderAdmin(view) {
   view.querySelectorAll('[data-drv]').forEach((b) => {
     b.onclick = action(async () => { await api('POST', `/api/admin/drivers/${b.dataset.drv}/approve`, { approved: b.dataset.v === '1' }); render(); });
   });
+}
+
+// ---------------------------------------------------------------- demo guide
+// Only in the standalone demo (window.maaDemo is provided by standalone/mock-api.js):
+// a role switcher and a step-by-step walkthrough of one order.
+
+const RANK = { placed: 1, accepted: 2, ready_for_pickup: 3, assigned: 4, picked_up: 5, delivered: 6 };
+const GUIDE_STEPS = [
+  { text: 'Pharmacy: add products to the cart and place the order', who: () => 'pharmacy@maa.test', hash: () => (Object.keys(state.cart).length ? '#cart' : '#catalog'), target: '#place, [data-add]' },
+  { text: 'Supplier: accept the order', who: (o) => o.supplierEmail, hash: (o) => `#order-${o.id}`, target: '[data-act=accept]' },
+  { text: 'Supplier: mark it packed and ready for pickup', who: (o) => o.supplierEmail, hash: (o) => `#order-${o.id}`, target: '[data-act=ready]' },
+  { text: 'Driver: take the delivery job', who: () => 'driver@maa.test', hash: (o) => `#order-${o.id}`, target: '[data-act=claim]' },
+  { text: 'Driver: confirm collection from the supplier', who: () => 'driver@maa.test', hash: (o) => `#order-${o.id}`, target: '[data-act=pickup]' },
+  { text: 'Driver: enter the delivery code {code} from the pharmacy', who: () => 'driver@maa.test', hash: (o) => `#order-${o.id}`, target: '#deliver input' },
+];
+
+function guideStep() {
+  const p = window.maaDemo.progress();
+  if (p.state === 'start') return { index: 0, order: null, done: false };
+  if (p.state === 'done') return { index: GUIDE_STEPS.length, order: p.order, done: true };
+  return { index: RANK[p.order.status], order: p.order, done: false };
+}
+
+async function switchTo(email, hash) {
+  if (state.user?.email !== email) {
+    const { token, user } = await api('POST', '/api/auth/login', { email, password: window.maaDemo.password });
+    state.token = token; state.user = user;
+    localSet('maa.token', token);
+  }
+  const target = hash || HOME[state.user.role];
+  if (location.hash === target) render(); else location.hash = target;
+}
+
+function renderGuide() {
+  if (!window.maaDemo) return;
+  let el = $('#guide');
+  if (!el) {
+    el = document.createElement('section');
+    el.id = 'guide';
+    el.className = 'guide';
+    el.setAttribute('aria-label', t('Try it in 6 steps'));
+    document.body.insertBefore(el, $('#view'));
+  }
+  const collapsed = localGet('maa.guide') === 'hidden';
+  const { index, order, done } = guideStep();
+  const me = state.user?.email;
+
+  const steps = GUIDE_STEPS.map((s, i) => {
+    const cls = i < index ? 'done' : i === index ? 'current' : 'todo';
+    const text = t(s.text, { code: order?.code ? `<bdi dir="ltr" class="code-inline">${esc(order.code)}</bdi>` : '' });
+    return `<li class="${cls}"><span class="num">${i < index ? '✓' : i + 1}</span><span class="txt">${text}</span>
+      ${i === index ? `<button class="primary small-btn" id="goStep">${t('Go to this step')}</button>` : ''}</li>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="guide-inner">
+      <div class="row spread">
+        <strong>${t('Try it in 6 steps')}</strong>
+        <button class="link" id="guideToggle">${t(collapsed ? 'Show steps' : 'Hide steps')}</button>
+      </div>
+      ${collapsed ? '' : `
+        <ol class="steps">${steps}</ol>
+        ${done ? `<div class="row guide-done"><span>${t('Done! The order was delivered. Try another order, or open the admin page.')}</span>
+          <button class="primary small-btn" id="restart">${t('Start a new order')}</button></div>` : ''}`}
+      <div class="switch">
+        <span class="small muted">${t('Switch role:')}</span>
+        ${window.maaDemo.accounts.map((a) => `<button class="chip ${a.email === me ? 'on' : ''}" data-switch="${a.email}" ${a.email === me ? 'aria-pressed="true"' : ''}>${t(a.label)}</button>`).join('')}
+      </div>
+      <div class="small muted row">${t('Demo version: runs entirely in your browser, data stays on this device.')}
+        <button class="link small" id="resetDemo">${t('Reset demo data')}</button></div>
+    </div>`;
+
+  $('#guideToggle', el).onclick = () => { localSet('maa.guide', collapsed ? null : 'hidden'); renderGuide(); };
+  $('#resetDemo', el).onclick = () => window.maaResetDemo();
+  el.querySelectorAll('[data-switch]').forEach((b) => { b.onclick = action(() => switchTo(b.dataset.switch)); });
+  const go = $('#goStep', el);
+  if (go) {
+    const s = GUIDE_STEPS[index];
+    go.onclick = action(() => switchTo(s.who(order), s.hash(order)));
+  }
+  const restart = $('#restart', el);
+  if (restart) restart.onclick = action(() => switchTo('pharmacy@maa.test', '#catalog'));
+}
+
+/** Outline the button the current step needs, if it is on screen for this role. */
+function highlightStep() {
+  if (!window.maaDemo) return;
+  document.querySelectorAll('.hint').forEach((n) => n.classList.remove('hint'));
+  const { index, order, done } = guideStep();
+  if (done) return;
+  const s = GUIDE_STEPS[index];
+  if (state.user?.email !== s.who(order)) return;
+  $(s.target, $('#view'))?.classList.add('hint');
 }
 
 // ---------------------------------------------------------------- boot

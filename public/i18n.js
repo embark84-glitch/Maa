@@ -98,6 +98,18 @@ const I18N = (() => {
     'Name': 'الاسم', 'Type': 'النوع', 'License': 'الترخيص', 'Verified': 'موثّق', 'Pending': 'قيد المراجعة', 'Suspend': 'إيقاف',
     'Verify': 'توثيق', 'Drivers': 'السائقون', 'Approved': 'معتمد', 'Approve': 'اعتماد', 'pharmacy': 'صيدلية', 'supplier': 'مورّد',
 
+    // demo guide
+    'Try it in 6 steps': 'جرّب التطبيق في 6 خطوات', 'Show steps': 'إظهار الخطوات', 'Hide steps': 'إخفاء الخطوات',
+    'Pharmacy: add products to the cart and place the order': 'الصيدلية: أضف منتجات إلى السلة ثم اضغط «تأكيد الطلب»',
+    'Supplier: accept the order': 'الشركة: اضغط «قبول الطلب»',
+    'Supplier: mark it packed and ready for pickup': 'الشركة: اضغط «تم التجهيز · جاهز للاستلام»',
+    'Driver: take the delivery job': 'السائق: اضغط «استلم هذه المهمة»',
+    'Driver: confirm collection from the supplier': 'السائق: اضغط «تم الاستلام من المورّد»',
+    'Driver: enter the delivery code {code} from the pharmacy': 'السائق: أدخل رمز التسليم {code} الذي تعطيه الصيدلية، ثم اضغط «تأكيد التسليم»',
+    'Go to this step': 'انتقل لهذه الخطوة', 'Switch role:': 'بدّل الدور:',
+    'Done! The order was delivered. Try another order, or open the admin page.': 'اكتملت التجربة! تم تسليم الطلب. جرّب طلباً جديداً أو افتح صفحة الإدارة.',
+    'Start a new order': 'ابدأ طلباً جديداً', 'Al Wadi (supplier)': 'شركة الوادي', 'Sahara (supplier)': 'شركة الصحراء',
+
     'Request failed ({status})': 'تعذّر تنفيذ العملية ({status})',
   };
 
