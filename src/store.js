@@ -1,7 +1,7 @@
 'use strict';
 /* Database schema and transaction helper. No Node-only APIs: also used by the browser demo. */
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const SCHEMA = `
 PRAGMA foreign_keys = ON;
@@ -56,10 +56,20 @@ CREATE TABLE IF NOT EXISTS products (
   min_order_qty INTEGER NOT NULL DEFAULT 1 CHECK (min_order_qty >= 1),
   cold_chain    INTEGER NOT NULL DEFAULT 0,
   active        INTEGER NOT NULL DEFAULT 1,
+  barcode       TEXT,                             -- GTIN/EAN printed on the pack
+  image_url     TEXT,                             -- https link, bundled path, or api/product-images/<id>
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_products_supplier ON products(supplier_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_products_sku ON products(supplier_id, sku);
+CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
+
+CREATE TABLE IF NOT EXISTS product_images (
+  product_id  INTEGER PRIMARY KEY REFERENCES products(id) ON DELETE CASCADE,
+  mime        TEXT NOT NULL,
+  data        BLOB NOT NULL,
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 CREATE TABLE IF NOT EXISTS orders (
   id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -142,14 +152,27 @@ CREATE TABLE IF NOT EXISTS order_events (
 );
 `;
 
-/** Create tables on a new database; refuse an old one instead of corrupting it. */
+/** Upgrades from older schema versions, applied in order. */
+const MIGRATIONS = {
+  3: [
+    'ALTER TABLE products ADD COLUMN barcode TEXT',
+    'ALTER TABLE products ADD COLUMN image_url TEXT',
+  ],
+};
+
+/** Create tables on a new database, or upgrade an existing one in place. */
 function applySchema(db) {
-  const version = db.prepare('PRAGMA user_version').get().user_version;
+  let version = db.prepare('PRAGMA user_version').get().user_version;
   const hasTables = db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'orders'").get().n > 0;
-  if (hasTables && version < SCHEMA_VERSION) {
+  if (hasTables && version < 2) {
     throw new Error('This database was made by an older version of Maa. Delete the data file (DB_FILE, default data/maa.db) and run "npm run seed" again.');
   }
-  db.exec(SCHEMA);
+  if (hasTables) {
+    for (; version < SCHEMA_VERSION; version++) {
+      for (const sql of MIGRATIONS[version + 1] || []) db.exec(sql);
+    }
+  }
+  db.exec(SCHEMA); // creates anything missing (new tables and indexes)
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 

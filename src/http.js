@@ -42,4 +42,21 @@ function errorBody(err) {
   return { status, body: { error: status >= 500 ? 'Internal server error' : err.message, ...(err.details && { details: err.details }) } };
 }
 
-module.exports = { HttpError, attachUser, requireRole, errorBody };
+/** Bytes for a binary response: a Buffer on Node, plain bytes in the browser demo. */
+const toBinary = (bytes) => (typeof Buffer !== 'undefined' ? Buffer.from(bytes) : bytes);
+
+/** Decode base64 on either runtime. */
+function fromBase64(b64) {
+  if (typeof Buffer !== 'undefined') return new Uint8Array(Buffer.from(b64, 'base64'));
+  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+}
+
+/** Split a data: URL into its media type and bytes; null if it is not a base64 data URL. */
+function parseDataUrl(s) {
+  const m = /^data:([\w/+.-]+);base64,([A-Za-z0-9+/=\s]+)$/.exec(String(s || ''));
+  if (!m) return null;
+  const b64 = m[2].replace(/\s/g, '');
+  return { mime: m[1].toLowerCase(), b64, bytes: fromBase64(b64) };
+}
+
+module.exports = { HttpError, attachUser, requireRole, errorBody, toBinary, fromBase64, parseDataUrl };

@@ -1,14 +1,15 @@
 'use strict';
-const { HttpError, requireRole } = require('../http');
+const { HttpError, requireRole, toBinary, parseDataUrl } = require('../http');
+const { buildPrompt, parseMatches } = require('../../shared/recognize');
 const { POLICY_COLS, shapePolicy, creditOutstanding } = require('../policy');
 const v = require('../validate');
 
 const PRODUCT_COLS = `p.id, p.supplier_id, p.name, p.generic_name, p.category, p.form, p.strength, p.pack_size,
-  p.sku, p.price, p.stock, p.min_order_qty, p.cold_chain, p.active`;
+  p.sku, p.price, p.stock, p.min_order_qty, p.cold_chain, p.active, p.barcode, p.image_url`;
 const shapeProduct = (p) => ({ ...p, cold_chain: !!p.cold_chain, active: !!p.active });
 
 /** What pharmacies see: verified companies, their terms, and their products. */
-module.exports = (app, { db }) => {
+module.exports = (app, { db, recognize }) => {
   const supplierRow = (id) => db.prepare(`
     SELECT o.id, o.name, o.city, o.address, o.phone, o.products_updated_at, ${POLICY_COLS},
            (SELECT COUNT(*) FROM products p WHERE p.supplier_id = o.id AND p.active = 1) AS product_count
@@ -38,6 +39,33 @@ module.exports = (app, { db }) => {
     res.json({ supplier: shapeSupplier(o, pid), products: products.map(shapeProduct) });
   });
 
+  /** Product photos uploaded by companies. Public, so <img> tags work without a token. */
+  app.get('/api/product-images/:id', (req, res) => {
+    const img = db.prepare('SELECT mime, data FROM product_images WHERE product_id = ?').get(v.int(req.params.id, 'id', { min: 1 }));
+    if (!img) throw new HttpError(404, 'Image not found');
+    res.set('Cache-Control', 'public, max-age=300');
+    res.type(img.mime).send(toBinary(img.data));
+  });
+
+  /**
+   * Order by photo: which of this company's products appear in the photo.
+   * Only suggests; the pharmacist confirms before anything is added to the order.
+   */
+  const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+  app.post('/api/suppliers/:id/recognize', requireRole('pharmacy'), async (req, res) => {
+    const supplierId = v.int(req.params.id, 'id', { min: 1 });
+    if (!supplierRow(true).get(supplierId)) throw new HttpError(404, 'Supplier not found');
+    if (!recognize) throw new HttpError(503, 'Photo ordering is not set up on this server', { code: 'recognition_unavailable' });
+    const img = parseDataUrl(req.body?.image);
+    if (!img || !PHOTO_TYPES.includes(img.mime)) throw new HttpError(400, 'Upload a JPEG, PNG or WebP photo');
+    if (img.bytes.length > 4_500_000) throw new HttpError(413, 'Upload is too large');
+    const products = db.prepare(`SELECT ${PRODUCT_COLS} FROM products p WHERE p.supplier_id = ? AND p.active = 1 ORDER BY p.name`).all(supplierId);
+    const answer = await recognize({ prompt: buildPrompt(products), mime: img.mime, b64: img.b64, bytes: img.bytes });
+    const { matches, not_found: notFound } = parseMatches(answer, products);
+    const byId = new Map(products.map((p) => [p.id, shapeProduct(p)]));
+    res.json({ matches: matches.map((m) => ({ ...m, product: byId.get(m.product_id) })), not_found: notFound });
+  });
+
   /** Search across all verified suppliers (used to compare prices). */
   app.get('/api/products', requireRole('pharmacy', 'admin'), (req, res) => {
     const where = ['p.active = 1', 'o.verified = 1'];
@@ -46,6 +74,10 @@ module.exports = (app, { db }) => {
     if (q) {
       where.push("(p.name LIKE ?1 ESCAPE '\\' OR p.generic_name LIKE ?1 ESCAPE '\\' OR p.sku LIKE ?1 ESCAPE '\\')");
       args.push(`%${q.replace(/[%_\\]/g, (c) => '\\' + c)}%`);
+    }
+    if (typeof req.query.barcode === 'string' && req.query.barcode) {
+      where.push('p.barcode = ?');
+      args.push(req.query.barcode.replace(/[^0-9]/g, ''));
     }
     if (req.query.supplier) {
       where.push('p.supplier_id = ?');

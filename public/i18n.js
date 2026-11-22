@@ -213,6 +213,32 @@ const I18N = (() => {
     'Company: mark the order packed and ready': 'الشركة: اضغط «تم التجهيز · جاهز للاستلام»',
     'Driver: confirm collection from the company': 'السائق: اضغط «تم الاستلام من المورّد»',
 
+    // photos, order by photo, barcodes (v4)
+    'Pharmacy: order by photo or barcode': 'الصيدلية: الطلب بالتصوير أو الباركود',
+    'Order by photo': 'اطلب بالتصوير', 'Scan barcode': 'مسح الباركود', 'Search by name, or scan a barcode': 'ابحث بالاسم، أو امسح الباركود',
+    'Added {name} · quantity {n}': 'أُضيف {name} · الكمية {n}', 'No product with barcode {code}': 'لا يوجد منتج بالباركود {code}',
+    '{name} is not sold by this company. Available from: {companies}': '{name} غير متوفر لدى هذه الشركة. متوفر لدى: {companies}',
+    'Your photo': 'صورتك', 'Reading the photo… this can take up to a minute.': 'جارٍ قراءة الصورة… قد يستغرق ذلك حتى دقيقة.',
+    'Order by photo is not set up yet. Ask the Maa team to turn it on.': 'الطلب بالتصوير غير مفعّل بعد. اطلب من فريق Maa تفعيله.',
+    'Photo reading needs your permission to use Claude. Allow it and try again.': 'قراءة الصور تحتاج إذنك باستخدام Claude. اسمح بذلك ثم حاول مجدداً.',
+    'Close': 'إغلاق', 'Done': 'تم',
+    'Found {n} products from {company}. Check the quantities, then add them.': 'وجدنا {n} من أصناف {company}. راجع الكميات ثم أضفها.',
+    'Check this: read as “{seen}”': 'تحقّق منه: قُرئ «{seen}»',
+    'No products from {company} were recognised in this photo.': 'لم نتعرّف في هذه الصورة على أصناف من {company}.',
+    'Not sold by this company:': 'غير متوفرة لدى هذه الشركة:', 'Add selected to the order': 'أضف المحدد إلى الطلب',
+    'Added {n} products to the order': 'أُضيفت {n} أصناف إلى الطلب',
+    'Starting the camera…': 'جارٍ تشغيل الكاميرا…', 'Photograph the barcode': 'صوّر الباركود', 'Reading the barcode…': 'جارٍ قراءة الباركود…',
+    'Barcode read: {code}': 'تمت قراءة الباركود: {code}',
+    'No barcode found. Hold the phone closer, in good light, and try again.': 'لم يُعثر على باركود. قرّب الهاتف في إضاءة جيدة وحاول مجدداً.',
+    'The barcode reader did not load. Check the internet connection.': 'لم يُحمَّل قارئ الباركود. تحقّق من الاتصال بالإنترنت.',
+    'Point the camera at the barcode on the pack.': 'وجّه الكاميرا نحو الباركود على العلبة.',
+    'The camera is not available here. Photograph the barcode instead, or use a handheld scanner in the search box.': 'الكاميرا غير متاحة هنا. صوّر الباركود بدلاً من ذلك، أو استخدم قارئ باركود يدوي في خانة البحث.',
+    'Barcode': 'الباركود', 'Change photo': 'تغيير الصورة', 'Add photo': 'إضافة صورة', 'Remove photo': 'حذف الصورة',
+    'You can add a photo after saving the product.': 'يمكنك إضافة صورة بعد حفظ المنتج.', 'Photo saved': 'تم حفظ الصورة', 'Photo removed': 'تم حذف الصورة',
+    'Photo link': 'رابط الصورة', 'Barcode must be 8 to 14 digits: {value}': 'الباركود يجب أن يكون من 8 إلى 14 رقماً: {value}',
+    'Barcode {value} appears more than once': 'الباركود {value} مكرر في الملف', 'Photo link must start with https://': 'رابط الصورة يجب أن يبدأ بـ https://',
+    'New photo': 'صورة جديدة', 'No photo': 'بلا صورة',
+
     'Request failed ({status})': 'تعذّر تنفيذ العملية ({status})',
   };
 
@@ -250,6 +276,14 @@ const I18N = (() => {
     [/^Missing or invalid API key$/, 'مفتاح API غير صحيح'],
     [/^payment_terms must be/, 'اختر طريقة الدفع'],
     [/^(Supplier|Key) not found$/, 'غير موجود'],
+    [/^Upload a JPEG, PNG or WebP photo$/, 'ارفع صورة بصيغة JPEG أو PNG أو WebP'],
+    [/^Photo ordering is not set up on this server$/, 'الطلب بالتصوير غير مفعّل بعد'],
+    [/^Photo reading is busy/, 'قراءة الصور مشغولة الآن. حاول بعد دقيقة.'],
+    [/^This photo could not be read/, 'تعذّرت قراءة هذه الصورة. جرّب صورة أوضح.'],
+    [/^Photo reading failed/, 'فشلت قراءة الصورة. حاول مجدداً.'],
+    [/^Photo reading needs permission/, 'قراءة الصور تحتاج إذنك باستخدام Claude.'],
+    [/^Barcode must be 8 to 14 digits$/, 'الباركود يجب أن يكون من 8 إلى 14 رقماً'],
+    [/^Image not found$/, 'غير موجود'],
     [/^Internal (server )?error$/, 'حدث خطأ في الخادم. حاول مرة أخرى.'],
   ];
 

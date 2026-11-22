@@ -3,6 +3,7 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const { openDb } = require('./db');
 const { createApp } = require('./app');
+const { createRecognizer } = require('./recognize-claude');
 
 const PORT = Number(process.env.PORT) || 3000;
 const DB_FILE = process.env.DB_FILE || path.join(__dirname, '..', 'data', 'maa.db');
@@ -23,6 +24,8 @@ const app = createApp({
   secret,
   currency: process.env.CURRENCY || 'LYD',
   deliveryFee: Math.round(Number(process.env.DELIVERY_FEE ?? 10) * 100),
+  // Order by photo uses Claude; set MAA_PHOTO_ORDERS=off to turn it off.
+  recognize: process.env.MAA_PHOTO_ORDERS === 'off' ? null : createRecognizer(),
 });
 
 app.listen(PORT, () => console.log(`Maa running on http://localhost:${PORT}`));

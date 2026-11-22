@@ -26,6 +26,7 @@
   --good-bg: #dcfae6; --good-fg: #085d3a;
   --cold-bg: #e0f2fe; --cold-fg: #075985;
   --toast-bg: #15201f; --toast-fg: #ffffff;
+  --ph-l: 90%; --ph-t: 28%; --overlay: rgb(10 20 19 / .45);
   --radius: 10px;
   font-family: "IBM Plex Sans Arabic", system-ui, -apple-system, "Segoe UI", Tahoma, "Noto Sans Arabic", sans-serif;
 }
@@ -38,6 +39,7 @@ bdi[dir="ltr"] { unicode-bidi: isolate; }
     --pending-bg: #4a2a0a; --pending-fg: #fec84b; --bad-bg: #55160c; --bad-fg: #fda29b;
     --good-bg: #053321; --good-fg: #75e0a7; --cold-bg: #0b2a3d; --cold-fg: #7cd4fd;
     --toast-bg: #e6eeed; --toast-fg: #0f1514;
+    --ph-l: 24%; --ph-t: 82%; --overlay: rgb(0 0 0 / .6);
     color-scheme: dark;
   }
 }
@@ -47,6 +49,7 @@ bdi[dir="ltr"] { unicode-bidi: isolate; }
   --pending-bg: #4a2a0a; --pending-fg: #fec84b; --bad-bg: #55160c; --bad-fg: #fda29b;
   --good-bg: #053321; --good-fg: #75e0a7; --cold-bg: #0b2a3d; --cold-fg: #7cd4fd;
   --toast-bg: #e6eeed; --toast-fg: #0f1514;
+  --ph-l: 24%; --ph-t: 82%; --overlay: rgb(0 0 0 / .6);
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -280,6 +283,42 @@ fieldset.pay-options legend + * { clear: both; }
   .kv { grid-template-columns: 1fr auto; }
 }
 
+/* ---------- v4: photos, order by photo, barcode scanning ---------- */
+.thumb { width: 56px; height: 56px; border-radius: 10px; object-fit: cover; flex: none; background: var(--bg); border: 1px solid var(--line); }
+.thumb.sm { width: 40px; height: 40px; border-radius: 8px; }
+.thumb.lg { width: 96px; height: 96px; }
+.thumb.ph { display: grid; place-items: center; font-weight: 700; font-size: .95rem; letter-spacing: .02em;
+  background: hsl(var(--h) 45% var(--ph-l)); color: hsl(var(--h) 50% var(--ph-t)); border-color: transparent; }
+.thumb.sm.ph { font-size: .75rem; }
+.with-thumb { display: flex; align-items: center; gap: .6rem; min-width: 0; }
+.photo-edit { align-items: center; }
+
+.quick-add { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; margin-bottom: .6rem; }
+.tool { display: flex; align-items: center; justify-content: center; gap: .45rem; padding: .7rem .8rem; font-weight: 600;
+  background: var(--brand-soft); color: var(--brand); border: 1px solid transparent; border-radius: 10px; cursor: pointer; text-align: center; }
+.tool:hover, .tool:focus-visible { border-color: var(--brand); }
+label.btn { display: inline-flex; align-items: center; gap: .4rem; cursor: pointer; }
+.prow.flash { animation: flash 1.2s ease-out; }
+@keyframes flash { 0% { background: var(--brand-soft); } 100% { background: var(--surface); } }
+@media (prefers-reduced-motion: reduce) { .prow.flash { animation: none; } }
+
+.sheet-back { position: fixed; inset: 0; z-index: 50; background: var(--overlay); display: grid; place-items: end center; }
+.sheet { background: var(--surface); color: var(--text); width: min(640px, 100%); max-height: 92vh; overflow-y: auto;
+  border-radius: 16px 16px 0 0; display: grid; gap: .8rem; padding-block: 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+@media (min-width: 700px) { .sheet-back { place-items: center; } .sheet { border-radius: 16px; } }
+.sheet h2 { margin: 0; }
+.photo-wrap img { max-height: 180px; max-width: 100%; border-radius: 10px; display: block; margin-inline: auto; }
+.found-list { display: grid; gap: .45rem; }
+.found { display: flex; align-items: center; gap: .6rem; border: 1px solid var(--line); border-radius: 10px; padding: .5rem .6rem; color: var(--text); font-size: .95rem; }
+.found:has(input[type=checkbox]:checked) { border-color: var(--brand); background: var(--brand-soft); }
+.found input[type=checkbox] { width: auto; flex: none; }
+.found .pinfo { display: grid; gap: .1rem; }
+.qty-in { width: 4.5rem; text-align: center; font-weight: 700; flex: none; }
+.scan-wrap { position: relative; border-radius: 12px; overflow: hidden; background: #000; aspect-ratio: 4 / 3; max-width: 100%; }
+.scan-wrap video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scan-line { position: absolute; inset-inline: 10%; top: 50%; height: 2px; background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+
 </style>
 </head>
 <body>
@@ -319,9 +358,9 @@ const { seed, DEMO_PASSWORD } = require('../src/seed');
 window.MaaPayment = require('../shared/payment');
 window.MaaImport = require('../shared/import');
 
-const STORE_KEY = 'maa.demo.sqlite.v3';
+const STORE_KEY = 'maa.demo.sqlite.v4';
 const CONFIG = { currency: 'LYD', deliveryFee: 1000 };
-const OLD_KEYS = ['maa.demo.db', 'maa.demo.db.v2', 'maa.cart'];
+const OLD_KEYS = ['maa.demo.db', 'maa.demo.db.v2', 'maa.cart', 'maa.demo.sqlite.v3'];
 
 // ---------- node:sqlite-style wrapper over sql.js ----------
 
@@ -396,6 +435,29 @@ function createRouter() {
   return { app, run, match };
 }
 
+// ---------- order by photo through the viewer's Claude ----------
+
+let samplePromise = null;
+const unavailable = () => new HttpError(503, 'Photo ordering is not set up on this server', { code: 'recognition_unavailable' });
+
+/** Same contract as src/recognize-claude.js: resolves Claude's JSON answer for the photo. */
+async function demoRecognize({ prompt, mime, bytes }) {
+  if (!window.claude?.use) throw unavailable();
+  const sample = await (samplePromise ||= window.claude.use('sample'));
+  if (!sample) throw unavailable();
+  const limits = await sample.limits().catch(() => null);
+  if (!limits?.images) throw unavailable();
+  try {
+    return await sample.json(prompt, { images: [new Blob([bytes], { type: mime })], modelTier: 'default', cache: false });
+  } catch (e) {
+    const code = e?.code;
+    if (code === 'not_granted' || code === 'sampling_disabled') throw new HttpError(403, 'Photo reading needs permission to use Claude', { code: 'not_granted' });
+    if (code === 'rate_limited') throw new HttpError(503, 'Photo reading is busy. Try again in a minute.', { code: 'recognition_busy' });
+    if (['images_unavailable', 'not_declared', 'capability_disabled', 'capability_removed'].includes(code)) throw unavailable();
+    throw new HttpError(422, 'This photo could not be read. Try a clearer photo.', { code: 'recognition_failed' });
+  }
+}
+
 // ---------- boot ----------
 
 let db = null;
@@ -424,7 +486,7 @@ const ready = (async () => {
     applySchema(db);
   }
   if (seed(db)) save();
-  const ctx = { db, secret: 'demo', ...CONFIG };
+  const ctx = { db, secret: 'demo', ...CONFIG, recognize: demoRecognize };
   router.attachUser = attachUser(ctx, verifyToken);
   registerRoutes(router.app, ctx);
 })();
@@ -452,9 +514,12 @@ async function handle(method, url, headers, bodyText) {
     get: (name) => headers.get(name),
   };
   const res = {
-    statusCode: 200, sent: false, payload: undefined,
+    statusCode: 200, sent: false, payload: undefined, binary: null, headers: {},
     status(code) { this.statusCode = code; return this; },
+    set(name, value) { this.headers[name.toLowerCase()] = value; return this; },
+    type(mime) { this.headers['content-type'] = mime; return this; },
     json(obj) { this.payload = obj; this.sent = true; return this; },
+    send(bytes) { this.binary = bytes; this.sent = true; return this; },
   };
   try {
     await router.run([router.attachUser], req, res);
@@ -464,6 +529,7 @@ async function handle(method, url, headers, bodyText) {
     await router.run(found.route.handlers, req, res);
     if (!res.sent) throw new Error(`No response from ${method} ${url.pathname}`);
     if (method !== 'GET') save();
+    if (res.binary) return new Response(res.binary, { status: res.statusCode, headers: res.headers });
     return reply(res.statusCode, res.payload);
   } catch (err) {
     if (!err.status) console.error(err);
@@ -576,14 +642,31 @@ function errorBody(err) {
   return { status, body: { error: status >= 500 ? 'Internal server error' : err.message, ...(err.details && { details: err.details }) } };
 }
 
-module.exports = { HttpError, attachUser, requireRole, errorBody };
+/** Bytes for a binary response: a Buffer on Node, plain bytes in the browser demo. */
+const toBinary = (bytes) => (typeof Buffer !== 'undefined' ? Buffer.from(bytes) : bytes);
+
+/** Decode base64 on either runtime. */
+function fromBase64(b64) {
+  if (typeof Buffer !== 'undefined') return new Uint8Array(Buffer.from(b64, 'base64'));
+  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+}
+
+/** Split a data: URL into its media type and bytes; null if it is not a base64 data URL. */
+function parseDataUrl(s) {
+  const m = /^data:([\w/+.-]+);base64,([A-Za-z0-9+/=\s]+)$/.exec(String(s || ''));
+  if (!m) return null;
+  const b64 = m[2].replace(/\s/g, '');
+  return { mime: m[1].toLowerCase(), b64, bytes: fromBase64(b64) };
+}
+
+module.exports = { HttpError, attachUser, requireRole, errorBody, toBinary, fromBase64, parseDataUrl };
 
 },
 "src/store": function (module, exports, require) {
 'use strict';
 /* Database schema and transaction helper. No Node-only APIs: also used by the browser demo. */
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const SCHEMA = `
 PRAGMA foreign_keys = ON;
@@ -638,10 +721,20 @@ CREATE TABLE IF NOT EXISTS products (
   min_order_qty INTEGER NOT NULL DEFAULT 1 CHECK (min_order_qty >= 1),
   cold_chain    INTEGER NOT NULL DEFAULT 0,
   active        INTEGER NOT NULL DEFAULT 1,
+  barcode       TEXT,                             -- GTIN/EAN printed on the pack
+  image_url     TEXT,                             -- https link, bundled path, or api/product-images/<id>
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_products_supplier ON products(supplier_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_products_sku ON products(supplier_id, sku);
+CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
+
+CREATE TABLE IF NOT EXISTS product_images (
+  product_id  INTEGER PRIMARY KEY REFERENCES products(id) ON DELETE CASCADE,
+  mime        TEXT NOT NULL,
+  data        BLOB NOT NULL,
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 CREATE TABLE IF NOT EXISTS orders (
   id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -724,14 +817,27 @@ CREATE TABLE IF NOT EXISTS order_events (
 );
 `;
 
-/** Create tables on a new database; refuse an old one instead of corrupting it. */
+/** Upgrades from older schema versions, applied in order. */
+const MIGRATIONS = {
+  3: [
+    'ALTER TABLE products ADD COLUMN barcode TEXT',
+    'ALTER TABLE products ADD COLUMN image_url TEXT',
+  ],
+};
+
+/** Create tables on a new database, or upgrade an existing one in place. */
 function applySchema(db) {
-  const version = db.prepare('PRAGMA user_version').get().user_version;
+  let version = db.prepare('PRAGMA user_version').get().user_version;
   const hasTables = db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'orders'").get().n > 0;
-  if (hasTables && version < SCHEMA_VERSION) {
+  if (hasTables && version < 2) {
     throw new Error('This database was made by an older version of Maa. Delete the data file (DB_FILE, default data/maa.db) and run "npm run seed" again.');
   }
-  db.exec(SCHEMA);
+  if (hasTables) {
+    for (; version < SCHEMA_VERSION; version++) {
+      for (const sql of MIGRATIONS[version + 1] || []) db.exec(sql);
+    }
+  }
+  db.exec(SCHEMA); // creates anything missing (new tables and indexes)
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -833,6 +939,13 @@ const { hashPassword } = require('./auth');
 
 const DEMO_PASSWORD = 'password123';
 
+/** A valid GTIN-13 in the GS1 internal-use range (prefix 2), so demo codes never collide with real packs. */
+function demoBarcode(n) {
+  const body = `2000000${String(n).padStart(5, '0')}`;
+  const sum = [...body].reduce((acc, d, i) => acc + Number(d) * (i % 2 ? 3 : 1), 0);
+  return body + ((10 - (sum % 10)) % 10);
+}
+
 function seed(db) {
   if (db.prepare('SELECT 1 FROM users WHERE email = ?').get('admin@maa.test')) return false;
   const pw = hashPassword(DEMO_PASSWORD);
@@ -863,21 +976,32 @@ function seed(db) {
     user('يوسف (سائق)', 'driver@maa.test', 'driver', null, '+218 94 000 0001', 'دراجة نارية');
 
     const product = db.prepare(`INSERT INTO products
-      (supplier_id, name, generic_name, category, form, strength, pack_size, sku, price, stock, min_order_qty, cold_chain)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      (supplier_id, name, generic_name, category, form, strength, pack_size, sku, price, stock, min_order_qty, cold_chain, barcode, image_url)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    // Prices and barcodes are illustrative. Barcodes use the GS1 "2" prefix, which is reserved
+    // for internal use and never printed on real retail packs, so they cannot be mistaken for real ones.
+    // Pack images (img/products) are cropped from a photo of a Libyan pharmacy shelf.
     const items = [
-      [s1, 'Panadol', 'Paracetamol', 'مسكنات', 'أقراص', '500 mg', 'علبة 24', 'NP-PAN-500', 450, 1200, 10, 0],
-      [s1, 'Brufen', 'Ibuprofen', 'مسكنات', 'أقراص', '400 mg', 'علبة 30', 'NP-BRU-400', 675, 800, 5, 0],
-      [s1, 'Augmentin', 'Amoxicillin + Clavulanate', 'مضادات حيوية', 'أقراص', '1 g', 'علبة 14', 'NP-AUG-1G', 1800, 300, 2, 0],
-      [s1, 'Ventolin Inhaler', 'Salbutamol', 'الجهاز التنفسي', 'بخاخ', '100 mcg', '200 جرعة', 'NP-VEN-100', 1250, 150, 1, 0],
-      [s1, 'Glucophage', 'Metformin', 'السكري', 'أقراص', '850 mg', 'علبة 30', 'NP-GLU-850', 525, 600, 5, 0],
-      [s2, 'Lantus SoloStar', 'Insulin glargine', 'السكري', 'قلم', '100 IU/ml', '5 أقلام', 'ML-LAN-100', 8500, 60, 1, 1],
-      [s2, 'Concor', 'Bisoprolol', 'القلب والضغط', 'أقراص', '5 mg', 'علبة 30', 'ML-CON-5', 850, 400, 3, 0],
-      [s2, 'Nexium', 'Esomeprazole', 'الجهاز الهضمي', 'كبسولات', '40 mg', 'علبة 14', 'ML-NEX-40', 1500, 250, 2, 0],
-      [s2, 'Zyrtec', 'Cetirizine', 'الحساسية', 'أقراص', '10 mg', 'علبة 20', 'ML-ZYR-10', 600, 500, 5, 0],
-      [s2, 'Panadol', 'Paracetamol', 'مسكنات', 'أقراص', '500 mg', 'علبة 24', 'ML-PAN-500', 425, 900, 10, 0],
+      [s1, 'Panadol', 'Paracetamol', 'مسكنات', 'أقراص', '500 mg', 'علبة 24', 'NP-PAN-500', 450, 1200, 10, 0, null],
+      [s1, 'Brufen', 'Ibuprofen', 'مسكنات', 'أقراص', '400 mg', 'علبة 30', 'NP-BRU-400', 675, 800, 5, 0, null],
+      [s1, 'Augmentin', 'Amoxicillin + Clavulanate', 'مضادات حيوية', 'أقراص', '1 g', 'علبة 14', 'NP-AUG-1G', 1800, 300, 2, 0, null],
+      [s1, 'Clindam', 'Clindamycin', 'مضادات حيوية', 'كبسولات', '300 mg', 'علبة 16', 'NP-CLI-300', 2100, 180, 2, 0, null],
+      [s1, 'Ventolin Inhaler', 'Salbutamol', 'الجهاز التنفسي', 'بخاخ', '100 mcg', '200 جرعة', 'NP-VEN-100', 1250, 150, 1, 0, null],
+      [s1, 'Glucophage', 'Metformin', 'السكري', 'أقراص', '850 mg', 'علبة 30', 'NP-GLU-850', 525, 600, 5, 0, null],
+      [s1, 'Mellitofix', 'Empagliflozin', 'السكري', 'أقراص مغلفة', '25 mg', 'علبة 30', 'NP-MEL-25', 4600, 90, 1, 0, null],
+      [s1, 'Tabuvan', 'Valsartan', 'القلب والضغط', 'أقراص', '160 mg', 'علبة 28', 'NP-TAB-160', 1950, 220, 2, 0, null],
+      [s2, 'Lantus SoloStar', 'Insulin glargine', 'السكري', 'قلم', '100 IU/ml', '5 أقلام', 'ML-LAN-100', 8500, 60, 1, 1, null],
+      [s2, 'Concor', 'Bisoprolol', 'القلب والضغط', 'أقراص', '5 mg', 'علبة 30', 'ML-CON-5', 850, 400, 3, 0, null],
+      [s2, 'Nexium', 'Esomeprazole', 'الجهاز الهضمي', 'كبسولات', '40 mg', 'علبة 14', 'ML-NEX-40', 1500, 250, 2, 0, null],
+      [s2, 'Zyrtec', 'Cetirizine', 'الحساسية', 'أقراص', '10 mg', 'علبة 20', 'ML-ZYR-10', 600, 500, 5, 0, null],
+      [s2, 'Panadol', 'Paracetamol', 'مسكنات', 'أقراص', '500 mg', 'علبة 24', 'ML-PAN-500', 425, 900, 10, 0, null],
+      [s2, 'Doliprane Vitamine C', 'Paracetamol + Vitamin C', 'نزلات البرد', 'أقراص فوارة', '500 mg/150 mg', 'علبة 16', 'ML-DOL-VC', 650, 600, 10, 0, 'img/products/doliprane-vitc.jpg'],
+      [s2, 'Actifed Rhume', 'Paracetamol + Pseudoephedrine + Triprolidine', 'نزلات البرد', 'أقراص', null, 'علبة 20', 'ML-ACT-RH', 900, 450, 10, 0, 'img/products/actifed-rhume.jpg'],
+      [s2, 'Rhinostop', null, 'نزلات البرد', 'أقراص', null, 'علبة 20', 'ML-RHI-20', 750, 380, 10, 0, 'img/products/rhinostop.jpg'],
+      [s2, '1-2-3', 'Paracetamol + Pseudoephedrine + Chlorpheniramine', 'نزلات البرد', 'أقراص', null, 'علبة 20', 'ML-123-20', 550, 700, 10, 0, 'img/products/one-two-three.jpg'],
+      [s2, 'Larypro', null, 'الحلق', 'أقراص استحلاب', null, 'علبة 20', 'ML-LAR-20', 700, 320, 10, 0, 'img/products/larypro.jpg'],
     ];
-    for (const it of items) product.run(...it);
+    items.forEach((it, i) => product.run(...it.slice(0, 12), demoBarcode(i + 1), it[12]));
   });
   return true;
 }
@@ -890,7 +1014,7 @@ if (require.main === module) {
   console.log(seed(db) ? `Seeded demo data. All demo accounts use password "${DEMO_PASSWORD}".` : 'Demo data already present.');
 }
 
-module.exports = { seed, DEMO_PASSWORD };
+module.exports = { seed, DEMO_PASSWORD, demoBarcode };
 
 },
 "src/routes/index": function (module, exports, require) {
@@ -985,16 +1109,17 @@ module.exports = (app, { db, secret }) => {
 },
 "src/routes/catalog": function (module, exports, require) {
 'use strict';
-const { HttpError, requireRole } = require('../http');
+const { HttpError, requireRole, toBinary, parseDataUrl } = require('../http');
+const { buildPrompt, parseMatches } = require('../../shared/recognize');
 const { POLICY_COLS, shapePolicy, creditOutstanding } = require('../policy');
 const v = require('../validate');
 
 const PRODUCT_COLS = `p.id, p.supplier_id, p.name, p.generic_name, p.category, p.form, p.strength, p.pack_size,
-  p.sku, p.price, p.stock, p.min_order_qty, p.cold_chain, p.active`;
+  p.sku, p.price, p.stock, p.min_order_qty, p.cold_chain, p.active, p.barcode, p.image_url`;
 const shapeProduct = (p) => ({ ...p, cold_chain: !!p.cold_chain, active: !!p.active });
 
 /** What pharmacies see: verified companies, their terms, and their products. */
-module.exports = (app, { db }) => {
+module.exports = (app, { db, recognize }) => {
   const supplierRow = (id) => db.prepare(`
     SELECT o.id, o.name, o.city, o.address, o.phone, o.products_updated_at, ${POLICY_COLS},
            (SELECT COUNT(*) FROM products p WHERE p.supplier_id = o.id AND p.active = 1) AS product_count
@@ -1024,6 +1149,33 @@ module.exports = (app, { db }) => {
     res.json({ supplier: shapeSupplier(o, pid), products: products.map(shapeProduct) });
   });
 
+  /** Product photos uploaded by companies. Public, so <img> tags work without a token. */
+  app.get('/api/product-images/:id', (req, res) => {
+    const img = db.prepare('SELECT mime, data FROM product_images WHERE product_id = ?').get(v.int(req.params.id, 'id', { min: 1 }));
+    if (!img) throw new HttpError(404, 'Image not found');
+    res.set('Cache-Control', 'public, max-age=300');
+    res.type(img.mime).send(toBinary(img.data));
+  });
+
+  /**
+   * Order by photo: which of this company's products appear in the photo.
+   * Only suggests; the pharmacist confirms before anything is added to the order.
+   */
+  const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+  app.post('/api/suppliers/:id/recognize', requireRole('pharmacy'), async (req, res) => {
+    const supplierId = v.int(req.params.id, 'id', { min: 1 });
+    if (!supplierRow(true).get(supplierId)) throw new HttpError(404, 'Supplier not found');
+    if (!recognize) throw new HttpError(503, 'Photo ordering is not set up on this server', { code: 'recognition_unavailable' });
+    const img = parseDataUrl(req.body?.image);
+    if (!img || !PHOTO_TYPES.includes(img.mime)) throw new HttpError(400, 'Upload a JPEG, PNG or WebP photo');
+    if (img.bytes.length > 4_500_000) throw new HttpError(413, 'Upload is too large');
+    const products = db.prepare(`SELECT ${PRODUCT_COLS} FROM products p WHERE p.supplier_id = ? AND p.active = 1 ORDER BY p.name`).all(supplierId);
+    const answer = await recognize({ prompt: buildPrompt(products), mime: img.mime, b64: img.b64, bytes: img.bytes });
+    const { matches, not_found: notFound } = parseMatches(answer, products);
+    const byId = new Map(products.map((p) => [p.id, shapeProduct(p)]));
+    res.json({ matches: matches.map((m) => ({ ...m, product: byId.get(m.product_id) })), not_found: notFound });
+  });
+
   /** Search across all verified suppliers (used to compare prices). */
   app.get('/api/products', requireRole('pharmacy', 'admin'), (req, res) => {
     const where = ['p.active = 1', 'o.verified = 1'];
@@ -1032,6 +1184,10 @@ module.exports = (app, { db }) => {
     if (q) {
       where.push("(p.name LIKE ?1 ESCAPE '\\' OR p.generic_name LIKE ?1 ESCAPE '\\' OR p.sku LIKE ?1 ESCAPE '\\')");
       args.push(`%${q.replace(/[%_\\]/g, (c) => '\\' + c)}%`);
+    }
+    if (typeof req.query.barcode === 'string' && req.query.barcode) {
+      where.push('p.barcode = ?');
+      args.push(req.query.barcode.replace(/[^0-9]/g, ''));
     }
     if (req.query.supplier) {
       where.push('p.supplier_id = ?');
@@ -1051,15 +1207,15 @@ module.exports.shapeProduct = shapeProduct;
 },
 "src/routes/supplier": function (module, exports, require) {
 'use strict';
-const { HttpError, requireRole } = require('../http');
+const { HttpError, requireRole, parseDataUrl } = require('../http');
 const { generateApiKey, hashApiKey } = require('../auth');
 const { getPolicy } = require('../policy');
 const { tx } = require('../store');
-const { normalizeProducts, planSync } = require('../../shared/import');
+const { normalizeProducts, planSync, toLatinDigits } = require('../../shared/import');
 const v = require('../validate');
 const { PRODUCT_COLS, shapeProduct } = require('./catalog');
 
-const EXISTING_COLS = 'id, sku, name, generic_name, category, form, strength, pack_size, price, stock, min_order_qty, cold_chain, active';
+const EXISTING_COLS = 'id, sku, name, generic_name, category, form, strength, pack_size, price, stock, min_order_qty, cold_chain, active, barcode, image_url';
 const LIST_LIMIT = 300; // rows of detail returned in a preview; the counts are always complete
 
 /**
@@ -1088,11 +1244,11 @@ function runImport(db, orgId, rows, { hideMissing = false, dryRun = true, skipEr
 
   const bool = (b) => (b ? 1 : 0);
   tx(db, () => {
-    const ins = db.prepare(`INSERT INTO products (supplier_id, sku, name, generic_name, category, form, strength, pack_size, price, stock, min_order_qty, cold_chain, active)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const ins = db.prepare(`INSERT INTO products (supplier_id, sku, name, generic_name, category, form, strength, pack_size, price, stock, min_order_qty, cold_chain, active, barcode, image_url)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     for (const p of plan.create) {
       ins.run(orgId, p.sku, p.name, p.generic_name ?? null, p.category ?? null, p.form ?? null, p.strength ?? null, p.pack_size ?? null,
-        p.price, p.stock ?? 0, p.min_order_qty ?? 1, bool(p.cold_chain), p.active === false ? 0 : 1);
+        p.price, p.stock ?? 0, p.min_order_qty ?? 1, bool(p.cold_chain), p.active === false ? 0 : 1, p.barcode ?? null, p.image_url ?? null);
     }
     for (const u of plan.update) {
       const cols = Object.keys(u.changes);
@@ -1130,6 +1286,11 @@ module.exports = (app, { db }) => {
     take('min_order_qty', (x) => v.int(x ?? 1, 'min_order_qty', { min: 1, max: 100_000 }));
     take('cold_chain', (x) => (x ? 1 : 0));
     take('active', (x) => (x === undefined ? 1 : x ? 1 : 0));
+    take('barcode', (x) => {
+      const b = x == null || x === '' ? null : toLatinDigits(String(x)).replace(/[\s-]/g, '');
+      if (b !== null && !/^\d{8,14}$/.test(b)) throw new HttpError(400, 'Barcode must be 8 to 14 digits');
+      return b;
+    });
     return out;
   };
   const uniqueSku = (fn) => {
@@ -1159,6 +1320,32 @@ module.exports = (app, { db }) => {
       uniqueSku(() => db.prepare(`UPDATE products SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`).run(...Object.values(p), id));
       touch(req.user.org_id);
     }
+    res.json({ product: shapeProduct(db.prepare(`SELECT ${PRODUCT_COLS} FROM products p WHERE p.id = ?`).get(id)) });
+  });
+
+  /** Product photo: the browser shrinks it first; stored in the database and served publicly. */
+  const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+  app.put('/api/supplier/products/:id/image', supplierOnly, (req, res) => {
+    const id = v.int(req.params.id, 'id', { min: 1 });
+    if (!db.prepare('SELECT 1 FROM products WHERE id = ? AND supplier_id = ?').get(id, req.user.org_id)) throw new HttpError(404, 'Product not found');
+    const img = parseDataUrl(req.body?.data_url);
+    if (!img || !IMAGE_TYPES.includes(img.mime)) throw new HttpError(400, 'Upload a JPEG, PNG or WebP photo');
+    if (img.bytes.length > 600_000) throw new HttpError(413, 'Upload is too large');
+    tx(db, () => {
+      db.prepare(`INSERT INTO product_images (product_id, mime, data, updated_at) VALUES (?, ?, ?, datetime('now'))
+        ON CONFLICT(product_id) DO UPDATE SET mime = excluded.mime, data = excluded.data, updated_at = excluded.updated_at`).run(id, img.mime, img.bytes);
+      db.prepare('UPDATE products SET image_url = ? WHERE id = ?').run(`api/product-images/${id}?v=${Date.now()}`, id);
+    });
+    res.json({ product: shapeProduct(db.prepare(`SELECT ${PRODUCT_COLS} FROM products p WHERE p.id = ?`).get(id)) });
+  });
+
+  app.delete('/api/supplier/products/:id/image', supplierOnly, (req, res) => {
+    const id = v.int(req.params.id, 'id', { min: 1 });
+    if (!db.prepare('SELECT 1 FROM products WHERE id = ? AND supplier_id = ?').get(id, req.user.org_id)) throw new HttpError(404, 'Product not found');
+    tx(db, () => {
+      db.prepare('DELETE FROM product_images WHERE product_id = ?').run(id);
+      db.prepare('UPDATE products SET image_url = NULL WHERE id = ?').run(id);
+    });
     res.json({ product: shapeProduct(db.prepare(`SELECT ${PRODUCT_COLS} FROM products p WHERE p.id = ?`).get(id)) });
   });
 
@@ -1308,7 +1495,8 @@ function loadOrder(db, id, user) {
   if (!canSee) return null;
   // Only the receiving pharmacy ever sees the handover code.
   if (!(user.role === 'pharmacy' || user.role === 'admin')) delete o.delivery_code;
-  o.items = db.prepare('SELECT product_id, name, unit_price, qty, line_total FROM order_items WHERE order_id = ?').all(id);
+  o.items = db.prepare(`SELECT i.product_id, i.name, i.unit_price, i.qty, i.line_total, p.image_url
+    FROM order_items i LEFT JOIN products p ON p.id = i.product_id WHERE i.order_id = ?`).all(id);
   o.payments = user.role === 'driver' ? [] : db.prepare(`
     SELECT p.amount, p.method, p.reference, p.created_at, u.name AS recorded_by
       FROM order_payments p LEFT JOIN users u ON u.id = p.recorded_by WHERE p.order_id = ? ORDER BY p.id`).all(id);
@@ -1700,10 +1888,12 @@ module.exports = (app, { db }) => {
     min_order_qty: ['min', 'min qty', 'min order', 'minimum order', 'moq', 'الحد الأدنى', 'الحد الأدنى للطلب', 'أقل كمية'],
     cold_chain: ['cold chain', 'cold', 'refrigerated', 'تبريد', 'سلسلة تبريد', 'مبرد'],
     active: ['active', 'listed', 'for sale', 'معروض', 'نشط', 'متاح للبيع'],
+    barcode: ['barcode', 'gtin', 'ean', 'upc', 'الباركود', 'باركود', 'رمز الباركود'],
+    image_url: ['image', 'image url', 'photo', 'picture', 'الصورة', 'رابط الصورة', 'صورة'],
   };
   const REQUIRED = ['sku', 'name', 'price'];
-  const TEMPLATE_HEADERS = ['رمز المنتج', 'الاسم التجاري', 'الاسم العلمي', 'الفئة', 'الشكل الدوائي', 'التركيز', 'حجم العبوة', 'السعر', 'الكمية المتوفرة', 'الحد الأدنى للطلب', 'تبريد'];
-  const TEMPLATE_EXAMPLE = ['NP-PAN-500', 'Panadol', 'Paracetamol', 'مسكنات', 'أقراص', '500 mg', 'علبة 24', '4.50', '1200', '10', 'لا'];
+  const TEMPLATE_HEADERS = ['رمز المنتج', 'الاسم التجاري', 'الاسم العلمي', 'الفئة', 'الشكل الدوائي', 'التركيز', 'حجم العبوة', 'السعر', 'الكمية المتوفرة', 'الحد الأدنى للطلب', 'تبريد', 'الباركود', 'رابط الصورة'];
+  const TEMPLATE_EXAMPLE = ['NP-PAN-500', 'Panadol', 'Paracetamol', 'مسكنات', 'أقراص', '500 mg', 'علبة 24', '4.50', '1200', '10', 'لا', '6221234567890', 'https://example.com/panadol.jpg'];
 
   const norm = (s) => String(s).trim().toLowerCase().replace(/[\s_\-./()]+/g, ' ').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').trim();
   const LOOKUP = {};
@@ -1768,6 +1958,7 @@ module.exports = (app, { db }) => {
 
     const products = [];
     const seen = new Map();
+    const seenBarcodes = new Map();
     rawRows.forEach((raw, i) => {
       const row = i + 2;
       const r = {};
@@ -1803,10 +1994,24 @@ module.exports = (app, { db }) => {
         if (b === null) return fail('bad_yes_no', 'cold_chain', 'Cold chain must be yes or no');
         p.cold_chain = b;
       }
+      if ('barcode' in r && r.barcode !== '' && r.barcode != null) {
+        const b = toLatinDigits(r.barcode).replace(/[\s-]/g, '');
+        if (!/^\d{8,14}$/.test(b)) return fail('bad_barcode', 'barcode', 'Barcode must be 8 to 14 digits');
+        p.barcode = b;
+      }
+      if ('image_url' in r && r.image_url !== '' && r.image_url != null) {
+        const u = String(r.image_url).trim();
+        if (!/^https:\/\/\S+$/i.test(u) || u.length > 500) return fail('bad_image_url', 'image_url', 'Image link must start with https://');
+        p.image_url = u;
+      }
       if ('active' in r) {
         const b = parseBool(r.active, true);
         if (b === null) return fail('bad_yes_no', 'active', 'Listed must be yes or no');
         p.active = b;
+      }
+      if (p.barcode) {
+        if (seenBarcodes.has(p.barcode)) return fail('duplicate_barcode', 'barcode', `Barcode ${p.barcode} also appears on row ${seenBarcodes.get(p.barcode)}`);
+        seenBarcodes.set(p.barcode, row);
       }
       p.row = row;
       products.push(p);
@@ -1814,7 +2019,7 @@ module.exports = (app, { db }) => {
     return { products, errors, unknownColumns: [...unknown] };
   }
 
-  const FIELDS = ['name', 'generic_name', 'category', 'form', 'strength', 'pack_size', 'price', 'stock', 'min_order_qty', 'cold_chain', 'active'];
+  const FIELDS = ['name', 'generic_name', 'category', 'form', 'strength', 'pack_size', 'price', 'stock', 'min_order_qty', 'cold_chain', 'active', 'barcode', 'image_url'];
   const same = (a, b) => (typeof a === 'boolean' || typeof b === 'boolean' ? !!a === !!b : (a ?? null) === (b ?? null));
 
   /**
@@ -1847,7 +2052,101 @@ module.exports = (app, { db }) => {
     return plan;
   }
 
-  return { COLUMNS, REQUIRED, TEMPLATE_HEADERS, TEMPLATE_EXAMPLE, MAX_ROWS, normalizeProducts, planSync, parseNumber };
+  return { COLUMNS, REQUIRED, TEMPLATE_HEADERS, TEMPLATE_EXAMPLE, MAX_ROWS, normalizeProducts, planSync, parseNumber, toLatinDigits };
+});
+
+},
+"shared/recognize": function (module, exports, require) {
+/*
+ * Order by photo: the prompt sent to Claude with a photo, and the check of its
+ * answer against the company's real catalogue. Shared by the Node server (Claude
+ * API) and the browser demo (the viewer's Claude), so both behave the same.
+ *
+ * The photo can be packs on a shelf, a handwritten or printed shortage list, or
+ * an old invoice. Claude may only pick product ids from the catalogue it is given;
+ * anything else comes back as "not found" for the pharmacist to see. Nothing is
+ * added to the order until the pharmacist confirms.
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.MaaRecognize = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  const MAX_CATALOG = 600;
+  const MAX_ITEMS = 60;
+
+  /** JSON schema of the answer (used for structured output on the Claude API). */
+  const SCHEMA = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['items'],
+    properties: {
+      items: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['product_id', 'name_seen', 'quantity', 'confidence'],
+          properties: {
+            product_id: { type: ['integer', 'null'] },
+            name_seen: { type: 'string' },
+            quantity: { type: ['integer', 'null'] },
+            confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+          },
+        },
+      },
+    },
+  };
+
+  const line = (p) => [p.id, [p.name, p.strength, p.form, p.pack_size].filter(Boolean).join(' '), p.generic_name || ''].join(' | ');
+
+  /** The instruction and catalogue, as one prompt. */
+  function buildPrompt(products) {
+    const list = products.slice(0, MAX_CATALOG).map(line).join('\n');
+    return `A pharmacy's purchasing manager took this photo to reorder medicines from one supplier.
+The photo may show medicine packs on a shelf, a handwritten or printed list of items to order, or an old invoice.
+
+List each distinct medicine you can actually read in the photo and match it to the supplier's catalogue below by brand name, strength and form.
+Rules:
+- Use only product_id values from the catalogue. If a medicine is not in the catalogue, set product_id to null and write what you read in name_seen.
+- If the photo shows a quantity to order for an item (a written number next to it), put it in quantity; otherwise quantity is null. Do not count boxes on a shelf as a quantity.
+- confidence is "high" when the name and strength are clearly readable, "medium" when the name is clear but the strength or form is not, "low" otherwise.
+- Do not list medicines you cannot read. Do not invent items.
+
+Reply with only JSON in this shape:
+{"items":[{"product_id":12,"name_seen":"Doliprane Vitamine C 500mg","quantity":null,"confidence":"high"}]}
+
+Catalogue (id | product | generic name):
+${list}`;
+  }
+
+  /**
+   * Keep only what can be trusted: known product ids (one entry each), whole positive
+   * quantities, and readable names for the items that are not in the catalogue.
+   */
+  function parseMatches(value, products) {
+    const byId = new Map(products.map((p) => [p.id, p]));
+    const items = Array.isArray(value?.items) ? value.items.slice(0, MAX_ITEMS) : [];
+    const matched = new Map();
+    const notFound = [];
+    for (const it of items) {
+      const seen = typeof it?.name_seen === 'string' ? it.name_seen.trim().slice(0, 120) : '';
+      const id = Number(it?.product_id);
+      const qty = Number.isInteger(it?.quantity) && it.quantity > 0 && it.quantity < 100000 ? it.quantity : null;
+      const confidence = ['high', 'medium', 'low'].includes(it?.confidence) ? it.confidence : 'low';
+      if (Number.isInteger(id) && byId.has(id)) {
+        const prev = matched.get(id);
+        if (!prev) matched.set(id, { product_id: id, name_seen: seen, quantity: qty, confidence });
+        else if (qty && (!prev.quantity || qty > prev.quantity)) prev.quantity = qty;
+      } else if (seen && !notFound.includes(seen)) {
+        notFound.push(seen);
+      }
+    }
+    return { matches: [...matched.values()], not_found: notFound };
+  }
+
+  return { SCHEMA, buildPrompt, parseMatches, MAX_CATALOG };
 });
 
 }};
@@ -2089,6 +2388,32 @@ const I18N = (() => {
     'Company: mark the order packed and ready': 'الشركة: اضغط «تم التجهيز · جاهز للاستلام»',
     'Driver: confirm collection from the company': 'السائق: اضغط «تم الاستلام من المورّد»',
 
+    // photos, order by photo, barcodes (v4)
+    'Pharmacy: order by photo or barcode': 'الصيدلية: الطلب بالتصوير أو الباركود',
+    'Order by photo': 'اطلب بالتصوير', 'Scan barcode': 'مسح الباركود', 'Search by name, or scan a barcode': 'ابحث بالاسم، أو امسح الباركود',
+    'Added {name} · quantity {n}': 'أُضيف {name} · الكمية {n}', 'No product with barcode {code}': 'لا يوجد منتج بالباركود {code}',
+    '{name} is not sold by this company. Available from: {companies}': '{name} غير متوفر لدى هذه الشركة. متوفر لدى: {companies}',
+    'Your photo': 'صورتك', 'Reading the photo… this can take up to a minute.': 'جارٍ قراءة الصورة… قد يستغرق ذلك حتى دقيقة.',
+    'Order by photo is not set up yet. Ask the Maa team to turn it on.': 'الطلب بالتصوير غير مفعّل بعد. اطلب من فريق Maa تفعيله.',
+    'Photo reading needs your permission to use Claude. Allow it and try again.': 'قراءة الصور تحتاج إذنك باستخدام Claude. اسمح بذلك ثم حاول مجدداً.',
+    'Close': 'إغلاق', 'Done': 'تم',
+    'Found {n} products from {company}. Check the quantities, then add them.': 'وجدنا {n} من أصناف {company}. راجع الكميات ثم أضفها.',
+    'Check this: read as “{seen}”': 'تحقّق منه: قُرئ «{seen}»',
+    'No products from {company} were recognised in this photo.': 'لم نتعرّف في هذه الصورة على أصناف من {company}.',
+    'Not sold by this company:': 'غير متوفرة لدى هذه الشركة:', 'Add selected to the order': 'أضف المحدد إلى الطلب',
+    'Added {n} products to the order': 'أُضيفت {n} أصناف إلى الطلب',
+    'Starting the camera…': 'جارٍ تشغيل الكاميرا…', 'Photograph the barcode': 'صوّر الباركود', 'Reading the barcode…': 'جارٍ قراءة الباركود…',
+    'Barcode read: {code}': 'تمت قراءة الباركود: {code}',
+    'No barcode found. Hold the phone closer, in good light, and try again.': 'لم يُعثر على باركود. قرّب الهاتف في إضاءة جيدة وحاول مجدداً.',
+    'The barcode reader did not load. Check the internet connection.': 'لم يُحمَّل قارئ الباركود. تحقّق من الاتصال بالإنترنت.',
+    'Point the camera at the barcode on the pack.': 'وجّه الكاميرا نحو الباركود على العلبة.',
+    'The camera is not available here. Photograph the barcode instead, or use a handheld scanner in the search box.': 'الكاميرا غير متاحة هنا. صوّر الباركود بدلاً من ذلك، أو استخدم قارئ باركود يدوي في خانة البحث.',
+    'Barcode': 'الباركود', 'Change photo': 'تغيير الصورة', 'Add photo': 'إضافة صورة', 'Remove photo': 'حذف الصورة',
+    'You can add a photo after saving the product.': 'يمكنك إضافة صورة بعد حفظ المنتج.', 'Photo saved': 'تم حفظ الصورة', 'Photo removed': 'تم حذف الصورة',
+    'Photo link': 'رابط الصورة', 'Barcode must be 8 to 14 digits: {value}': 'الباركود يجب أن يكون من 8 إلى 14 رقماً: {value}',
+    'Barcode {value} appears more than once': 'الباركود {value} مكرر في الملف', 'Photo link must start with https://': 'رابط الصورة يجب أن يبدأ بـ https://',
+    'New photo': 'صورة جديدة', 'No photo': 'بلا صورة',
+
     'Request failed ({status})': 'تعذّر تنفيذ العملية ({status})',
   };
 
@@ -2126,6 +2451,14 @@ const I18N = (() => {
     [/^Missing or invalid API key$/, 'مفتاح API غير صحيح'],
     [/^payment_terms must be/, 'اختر طريقة الدفع'],
     [/^(Supplier|Key) not found$/, 'غير موجود'],
+    [/^Upload a JPEG, PNG or WebP photo$/, 'ارفع صورة بصيغة JPEG أو PNG أو WebP'],
+    [/^Photo ordering is not set up on this server$/, 'الطلب بالتصوير غير مفعّل بعد'],
+    [/^Photo reading is busy/, 'قراءة الصور مشغولة الآن. حاول بعد دقيقة.'],
+    [/^This photo could not be read/, 'تعذّرت قراءة هذه الصورة. جرّب صورة أوضح.'],
+    [/^Photo reading failed/, 'فشلت قراءة الصورة. حاول مجدداً.'],
+    [/^Photo reading needs permission/, 'قراءة الصور تحتاج إذنك باستخدام Claude.'],
+    [/^Barcode must be 8 to 14 digits$/, 'الباركود يجب أن يكون من 8 إلى 14 رقماً'],
+    [/^Image not found$/, 'غير موجود'],
     [/^Internal (server )?error$/, 'حدث خطأ في الخادم. حاول مرة أخرى.'],
   ];
 
@@ -2201,11 +2534,52 @@ const money = (minor) => new Intl.NumberFormat(I18N.locale, { style: 'currency',
 const when = (iso) => new Date(iso.replace(' ', 'T') + (iso.length > 10 ? 'Z' : '')).toLocaleString(I18N.locale, iso.length > 10 ? { dateStyle: 'medium', timeStyle: 'short' } : { dateStyle: 'medium' });
 const day = (iso) => new Date(iso.slice(0, 10) + 'T00:00:00Z').toLocaleDateString(I18N.locale, { dateStyle: 'medium', timeZone: 'UTC' });
 const ltr = (s) => `<bdi dir="ltr">${esc(s)}</bdi>`;
+/** A product name keeps its own direction ("1-2-3" must not read "3-2-1" in Arabic). */
+const nm = (s) => `<bdi>${esc(s)}</bdi>`;
 const phone = (p) => (p ? `<div><a href="tel:${esc(p.replace(/\s+/g, ''))}">${ltr(p)}</a></div>` : '');
 /** Whole number from user input, accepting Arabic-Indic digits. NaN when not a whole number. */
 const toInt = (s) => { const n = MaaImport.parseNumber(String(s ?? '').trim()); return Number.isInteger(n) ? n : NaN; };
 /** Amount typed in dinars ("4,50", "٤٫٥") -> number of dinars, or NaN. */
 const toAmount = (s) => MaaImport.parseNumber(String(s ?? '').trim());
+
+// ---------------------------------------------------------------- product images
+
+const initials = (name) => String(name || '?').replace(/[^\p{L}\p{N} ]/gu, '').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
+const hue = (name) => [...String(name)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+/** A product's pack photo, or a coloured tile with its initials when there is none. */
+const thumb = (p, cls = '') => (p?.image_url
+  ? `<img class="thumb ${cls}" data-src="${esc(p.image_url)}" data-name="${esc(p.name)}" alt="" loading="lazy">`
+  : `<span class="thumb ph ${cls}" style="--h:${hue(p?.name)}" aria-hidden="true">${esc(initials(p?.name))}</span>`);
+
+/** Load images after rendering. In the demo, photos served by the in-browser server go through fetch. */
+function hydrateImages(root = document) {
+  for (const img of root.querySelectorAll('img[data-src]')) {
+    const url = img.dataset.src;
+    img.removeAttribute('data-src');
+    img.onerror = () => { img.outerHTML = thumb({ name: img.dataset.name }, img.className.replace('thumb', '').trim()); };
+    if (window.maaDemo && url.startsWith('api/')) {
+      fetch(`/${url}`).then((r) => (r.ok ? r.blob() : Promise.reject())).then((b) => { img.src = URL.createObjectURL(b); }).catch(() => img.onerror());
+    } else {
+      img.src = url;
+    }
+  }
+}
+
+/** Shrink a photo before sending it: longest side `max` px, JPEG. Resolves a data: URL. */
+async function shrinkImage(file, max = 1600, quality = 0.85) {
+  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() => null);
+  const src = bitmap || await new Promise((resolve, reject) => {
+    const im = new Image(); im.onload = () => resolve(im); im.onerror = reject; im.src = URL.createObjectURL(file);
+  });
+  const w = src.width; const h = src.height;
+  const k = Math.min(1, max / Math.max(w, h));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(w * k); canvas.height = Math.round(h * k);
+  const g = canvas.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, canvas.width, canvas.height);
+  g.drawImage(src, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', quality);
+}
 
 const STATUS_LABEL = {
   placed: 'Awaiting company approval', accepted: 'Accepted by the company', rejected: 'Rejected', cancelled: 'Cancelled',
@@ -2339,6 +2713,7 @@ async function render() {
   if (!fn) { location.hash = HOME[u.role]; return; }
   view.innerHTML = `<p class="muted">${t('Loading…')}</p>`;
   try { await fn(view, param); } catch (e) { view.innerHTML = `<div class="card">${esc(e.message)}</div>`; }
+  hydrateImages(view);
   highlightStep();
 }
 
@@ -2517,14 +2892,20 @@ async function renderShop(view, sid) {
       <a href="#new" class="small">${t('Change company')}</a>
     </div>
     <div class="shop-tools">
-      <input id="q" class="search" type="search" placeholder="${t('Search by brand, generic name or SKU')}" aria-label="${t('Search')}">
+      <div class="quick-add">
+        <label class="btn tool" for="photoFile">${ICON.camera}<span>${t('Order by photo')}</span></label>
+        <input type="file" id="photoFile" accept="image/*" hidden>
+        <button class="tool" id="scanBtn">${ICON.barcode}<span>${t('Scan barcode')}</span></button>
+      </div>
+      <input id="q" class="search" type="search" enterkeyhint="search" placeholder="${t('Search by name, or scan a barcode')}" aria-label="${t('Search')}">
       ${categories.length > 1 ? `<div class="chips" id="cats"><button class="chip on" data-cat="">${t('All')}</button>${categories.map((c) => `<button class="chip" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : ''}
     </div>
     <div class="product-list" id="plist">
       ${products.map((p) => `
-        <div class="prow" data-pid="${p.id}" data-search="${esc([p.name, p.generic_name, p.sku].join(' ').toLowerCase())}" data-cat="${esc(p.category || '')}">
+        <div class="prow" data-pid="${p.id}" data-search="${esc([p.name, p.generic_name, p.sku, p.barcode].join(' ').toLowerCase())}" data-cat="${esc(p.category || '')}">
+          ${thumb(p)}
           <div class="pinfo">
-            <div><strong>${esc(p.name)}</strong> <span class="muted">${esc(p.strength || '')}</span>
+            <div><strong>${nm(p.name)}</strong> <span class="muted">${esc(p.strength || '')}</span>
               ${p.cold_chain ? `<span class="tag cold">${t('Cold chain')}</span>` : ''}</div>
             <div class="small muted">${esc([p.generic_name, p.form, p.pack_size].filter(Boolean).join(' · '))}</div>
             <div class="small"><span class="price">${money(p.price)}</span>
@@ -2537,6 +2918,8 @@ async function renderShop(view, sid) {
     <div class="cartbar" id="cartbar"></div>`;
 
   const byId = new Map(products.map((p) => [String(p.id), p]));
+  const byBarcode = new Map(products.filter((p) => p.barcode).map((p) => [p.barcode, p]));
+  const rowOf = (p) => $(`.prow[data-pid="${p.id}"]`, view);
   const problem = (p, q) => (q > 0 && q < p.min_order_qty ? t('Minimum order is {n}', { n: p.min_order_qty })
     : q > p.stock ? t('Only {n} in stock', { n: p.stock }) : '');
 
@@ -2575,45 +2958,283 @@ async function renderShop(view, sid) {
     highlightStep();
   };
 
-  const setQty = (row, q) => {
-    const p = byId.get(row.dataset.pid);
+  const setQty = (p, q) => {
     if (q > 0) draft[p.id] = q; else delete draft[p.id];
     saveDrafts();
-    drawRow(row); drawBar();
+    drawRow(rowOf(p)); drawBar();
+  };
+  const flash = (p) => {
+    const row = rowOf(p);
+    row.hidden = false;
+    row.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    row.classList.remove('flash'); void row.offsetWidth; row.classList.add('flash');
+  };
+  /** Add one scanned or recognised product: its minimum the first time, one more after that. */
+  const addOne = (p) => {
+    const cur = draft[p.id] || 0;
+    setQty(p, cur ? cur + 1 : p.min_order_qty);
+    flash(p);
+    return draft[p.id];
+  };
+
+  /** A scanned barcode: add it if this company sells it, otherwise say who does. */
+  const onBarcode = async (raw) => {
+    const code = MaaImport.toLatinDigits(String(raw)).replace(/\D/g, '');
+    const p = byBarcode.get(code);
+    if (p) {
+      const q = addOne(p);
+      toast(t('Added {name} · quantity {n}', { name: p.name, n: q }));
+      if (navigator.vibrate) navigator.vibrate(60);
+      return p;
+    }
+    const others = (await api('GET', `/api/products?barcode=${encodeURIComponent(code)}`).catch(() => ({ products: [] }))).products;
+    toast(others.length
+      ? t('{name} is not sold by this company. Available from: {companies}', { name: others[0].name, companies: [...new Set(others.map((o) => o.supplier_name))].join('، ') })
+      : t('No product with barcode {code}', { code }), true);
+    return null;
   };
 
   $$('.prow', view).forEach((row) => {
     drawRow(row);
     row.addEventListener('click', (e) => {
       const p = byId.get(row.dataset.pid);
-      if (e.target.closest('[data-add]')) { setQty(row, p.min_order_qty); $('[data-qty]', row)?.focus(); }
+      if (e.target.closest('[data-add]')) { setQty(p, p.min_order_qty); $('[data-qty]', row)?.focus(); }
       const step = e.target.closest('[data-step]');
       if (step) {
         const cur = draft[p.id] || 0;
         let next = cur + Number(step.dataset.step);
         if (next > 0 && next < p.min_order_qty) next = step.dataset.step < 0 ? 0 : p.min_order_qty;
-        setQty(row, Math.max(0, next));
+        setQty(p, Math.max(0, next));
       }
     });
     row.addEventListener('change', (e) => {
       if (!e.target.matches('[data-qty]')) return;
       const q = toInt(e.target.value);
       if (Number.isNaN(q) || q < 0) { toast(t('Enter a whole number'), true); drawRow(row); return; }
-      setQty(row, q);
+      setQty(byId.get(row.dataset.pid), q);
     });
   });
 
   let cat = '';
+  const search = $('#q', view);
   const filter = () => {
-    const q = $('#q', view).value.trim().toLowerCase();
+    const q = search.value.trim().toLowerCase();
     $$('.prow', view).forEach((r) => { r.hidden = (q && !r.dataset.search.includes(q)) || (cat && r.dataset.cat !== cat); });
   };
-  $('#q', view).oninput = filter;
+  search.oninput = filter;
+  // Handheld scanners type the code and press Enter.
+  search.onkeydown = (e) => {
+    if (e.key !== 'Enter') return;
+    const v = MaaImport.toLatinDigits(search.value.trim());
+    if (/^\d{8,14}$/.test(v)) { e.preventDefault(); onBarcode(v); search.value = ''; filter(); }
+  };
   $$('#cats [data-cat]', view).forEach((b) => {
     b.onclick = () => { cat = b.dataset.cat; $$('#cats [data-cat]', view).forEach((x) => x.classList.toggle('on', x === b)); filter(); };
   });
+
+  $('#scanBtn', view).onclick = () => openScanner(onBarcode);
+  $('#photoFile', view).onchange = (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (file) openPhotoOrder(s, file, { draft, byId, setQty, flash, drawBar });
+  };
   drawBar();
 }
+
+// ---------------------------------------------------------------- order by photo
+
+/** Send a photo, then let the pharmacist confirm what to add. Nothing is added without a tap. */
+async function openPhotoOrder(s, file, shop) {
+  const sheet = openSheet(`
+    <h2>${t('Order by photo')}</h2>
+    <div class="photo-wrap"><img id="photoPrev" alt="${t('Your photo')}"></div>
+    <div id="photoBody" class="stack"><p class="muted">${t('Reading the photo… this can take up to a minute.')}</p></div>`);
+  const prev = $('#photoPrev', sheet.el);
+  prev.src = URL.createObjectURL(file);
+  let result;
+  try {
+    const image = await shrinkImage(file);
+    result = await api('POST', `/api/suppliers/${s.id}/recognize`, { image });
+  } catch (e) {
+    if (!sheet.open()) return;
+    const code = e.details?.code;
+    $('#photoBody', sheet.el).innerHTML = `<p class="err">${esc(code === 'recognition_unavailable' ? t('Order by photo is not set up yet. Ask the Maa team to turn it on.')
+      : code === 'not_granted' ? t('Photo reading needs your permission to use Claude. Allow it and try again.') : e.message)}</p>
+      <div class="row"><button id="closeSheet">${t('Close')}</button></div>`;
+    $('#closeSheet', sheet.el).onclick = sheet.close;
+    return;
+  }
+  if (!sheet.open()) return;
+  const { matches, not_found: notFound } = result;
+  const body = $('#photoBody', sheet.el);
+  body.innerHTML = `
+    ${matches.length ? `<p>${t('Found {n} products from {company}. Check the quantities, then add them.', { n: matches.length, company: esc(s.name) })}</p>
+      <div class="found-list">${matches.map((m) => {
+        const p = m.product;
+        const q = m.quantity || shop.draft[p.id] || p.min_order_qty;
+        return `<label class="found ${m.confidence}">
+          <input type="checkbox" data-pick="${p.id}" ${m.confidence === 'low' ? '' : 'checked'}>
+          ${thumb(p, 'sm')}
+          <span class="pinfo"><strong>${nm(p.name)}</strong> <span class="small muted">${esc([p.strength, p.pack_size].filter(Boolean).join(' · '))}</span>
+            ${m.confidence !== 'high' ? `<span class="small warn-text">${t('Check this: read as “{seen}”', { seen: esc(m.name_seen) })}</span>` : ''}</span>
+          <input class="qty-in" data-pq="${p.id}" inputmode="numeric" value="${q}" aria-label="${t('Quantity')}">
+        </label>`;
+      }).join('')}</div>` : `<p>${t('No products from {company} were recognised in this photo.', { company: esc(s.name) })}</p>`}
+    ${notFound.length ? `<div class="small"><strong>${t('Not sold by this company:')}</strong> ${notFound.map(esc).join('، ')}</div>` : ''}
+    <div class="row">
+      ${matches.length ? `<button class="primary" id="addFound">${t('Add selected to the order')}</button>` : ''}
+      <button id="closeSheet">${t(matches.length ? 'Cancel' : 'Close')}</button>
+    </div>`;
+  hydrateImages(body);
+  $('#closeSheet', sheet.el).onclick = sheet.close;
+  const add = $('#addFound', sheet.el);
+  if (add) {
+    add.onclick = () => {
+      let n = 0;
+      for (const box of $$('[data-pick]:checked', sheet.el)) {
+        const p = shop.byId.get(box.dataset.pick);
+        const q = toInt($(`[data-pq="${p.id}"]`, sheet.el).value);
+        if (!(q > 0)) continue;
+        shop.setQty(p, Math.max(q, p.min_order_qty));
+        n += 1;
+      }
+      sheet.close();
+      toast(t('Added {n} products to the order', { n }));
+    };
+  }
+}
+
+// ---------------------------------------------------------------- barcode scanning
+
+const ZXING_URL = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
+const BARCODE_FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'];
+let zxingLoading;
+function loadZxing() {
+  if (window.ZXing) return Promise.resolve(window.ZXing);
+  zxingLoading ||= new Promise((resolve, reject) => {
+    const sc = document.createElement('script');
+    sc.src = ZXING_URL; sc.onload = () => resolve(window.ZXing); sc.onerror = () => { zxingLoading = null; reject(new Error('zxing')); };
+    document.head.append(sc);
+  });
+  return zxingLoading;
+}
+async function nativeDetector() {
+  if (!('BarcodeDetector' in window)) return null;
+  try {
+    const supported = await BarcodeDetector.getSupportedFormats();
+    const formats = BARCODE_FORMATS.filter((f) => supported.includes(f));
+    return formats.length ? new BarcodeDetector({ formats }) : null;
+  } catch { return null; }
+}
+
+/** Read a barcode from a still photo (works where the live camera is not allowed). */
+async function decodePhoto(file) {
+  const det = await nativeDetector();
+  if (det) {
+    const found = await det.detect(await createImageBitmap(file)).catch(() => []);
+    if (found[0]) return found[0].rawValue;
+  }
+  const ZX = await loadZxing();
+  const url = URL.createObjectURL(file);
+  try {
+    const r = await new ZX.BrowserMultiFormatReader().decodeFromImageUrl(url);
+    return r.getText();
+  } catch { return null; } finally { URL.revokeObjectURL(url); }
+}
+
+/** Live camera scanning, with a "photograph the barcode" fallback. */
+function openScanner(onCode) {
+  const sheet = openSheet(`
+    <h2>${t('Scan barcode')}</h2>
+    <div class="scan-wrap" id="scanWrap" hidden><video id="scanVideo" playsinline muted></video><span class="scan-line"></span></div>
+    <p class="small muted" id="scanMsg">${t('Starting the camera…')}</p>
+    <div class="row">
+      <label class="btn" for="barPhoto">${ICON.camera}<span>${t('Photograph the barcode')}</span></label>
+      <input type="file" id="barPhoto" accept="image/*" capture="environment" hidden>
+      <button id="closeSheet">${t('Done')}</button>
+    </div>
+    <ul class="plain small" id="scanned"></ul>`);
+  const el = sheet.el;
+  const msg = $('#scanMsg', el);
+  let stream = null; let timer = null; let zxReader = null; let last = ''; let lastAt = 0;
+  const stop = () => {
+    clearInterval(timer);
+    zxReader?.reset();
+    stream?.getTracks().forEach((tr) => tr.stop());
+  };
+  sheet.onClose(stop);
+  $('#closeSheet', el).onclick = sheet.close;
+
+  const got = async (code) => {
+    if (!code || (code === last && Date.now() - lastAt < 2500)) return;
+    last = code; lastAt = Date.now();
+    const p = await onCode(code);
+    $('#scanned', el).insertAdjacentHTML('afterbegin', `<li>${p ? `✓ ${nm(p.name)}` : `<span class="err">✗ ${ltr(code)}</span>`}</li>`);
+  };
+
+  $('#barPhoto', el).onchange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    msg.textContent = t('Reading the barcode…');
+    try {
+      const code = await decodePhoto(file);
+      msg.textContent = code ? t('Barcode read: {code}', { code }) : t('No barcode found. Hold the phone closer, in good light, and try again.');
+      if (code) got(code);
+    } catch {
+      msg.textContent = t('The barcode reader did not load. Check the internet connection.');
+    }
+  };
+
+  (async () => {
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error('no camera');
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      if (!sheet.open()) { stop(); return; }
+      const video = $('#scanVideo', el);
+      video.srcObject = stream;
+      await video.play();
+      $('#scanWrap', el).hidden = false;
+      msg.textContent = t('Point the camera at the barcode on the pack.');
+      const det = await nativeDetector();
+      if (det) {
+        timer = setInterval(async () => {
+          const found = await det.detect(video).catch(() => []);
+          if (found[0]) got(found[0].rawValue);
+        }, 250);
+      } else {
+        const ZX = await loadZxing();
+        zxReader = new ZX.BrowserMultiFormatReader();
+        stream.getTracks().forEach((tr) => tr.stop()); // ZXing opens its own stream
+        zxReader.decodeFromConstraints({ video: { facingMode: 'environment' } }, video, (r) => { if (r) got(r.getText()); });
+      }
+    } catch {
+      if (sheet.open()) msg.textContent = t('The camera is not available here. Photograph the barcode instead, or use a handheld scanner in the search box.');
+    }
+  })();
+}
+
+// ---------------------------------------------------------------- bottom sheet
+
+/** A simple modal panel. Returns { el, close, open(), onClose(fn) }. */
+function openSheet(html) {
+  const back = document.createElement('div');
+  back.className = 'sheet-back';
+  back.innerHTML = `<div class="sheet" role="dialog" aria-modal="true">${html}</div>`;
+  document.body.append(back);
+  let isOpen = true; const closers = [];
+  const close = () => { if (!isOpen) return; isOpen = false; closers.forEach((f) => f()); back.remove(); document.removeEventListener('keydown', esc_); };
+  const esc_ = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', esc_);
+  back.addEventListener('click', (e) => { if (e.target === back) close(); });
+  setTimeout(() => back.querySelector('button, [href], input, label.btn')?.focus(), 0);
+  return { el: back.querySelector('.sheet'), close, open: () => isOpen, onClose: (f) => closers.push(f) };
+}
+
+const ICON = {
+  camera: '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>',
+  barcode: '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6v12M7 6v12M11 6v12M14 6v12M17 6v12M20 6v12"/></svg>',
+};
 
 async function renderCheckout(view, sid) {
   const { supplier: s, products } = await api('GET', `/api/suppliers/${sid}`);
@@ -2645,8 +3266,8 @@ async function renderCheckout(view, sid) {
           <div class="row spread"><h2>${esc(s.name)}</h2><a href="#shop-${sid}" class="small">${t('Edit items')}</a></div>
           <div class="table-wrap"><table>
             <tr><th>${t('Product')}</th><th>${t('Qty')}</th><th>${t('Total')}</th></tr>
-            ${lines.map((l) => `<tr><td>${esc(l.p.name)} <span class="small muted">${esc([l.p.strength, l.p.pack_size].filter(Boolean).join(' · '))}</span>
-              <div class="small muted">${money(l.p.price)}</div></td><td>${l.q}</td><td>${money(l.p.price * l.q)}</td></tr>`).join('')}
+            ${lines.map((l) => `<tr><td><div class="with-thumb">${thumb(l.p, 'sm')}<div>${nm(l.p.name)} <span class="small muted">${esc([l.p.strength, l.p.pack_size].filter(Boolean).join(' · '))}</span>
+              <div class="small muted">${money(l.p.price)}</div></div></div></td><td>${l.q}</td><td>${money(l.p.price * l.q)}</td></tr>`).join('')}
           </table></div>
           <div class="totals">
             <div class="row spread"><span>${t('Products')}</span><span>${money(subtotal)}</span></div>
@@ -2876,7 +3497,7 @@ async function renderOrderDetail(view, id) {
         <h2>${t('Items')}</h2>
         <table>
           <tr><th>${t('Product')}</th><th>${t('Unit')}</th><th>${t('Qty')}</th><th>${t('Total')}</th></tr>
-          ${o.items.map((i) => `<tr><td>${esc(i.name)}</td><td>${money(i.unit_price)}</td><td>${i.qty}</td><td>${money(i.line_total)}</td></tr>`).join('')}
+          ${o.items.map((i) => `<tr><td><div class="with-thumb">${thumb(i, 'sm')}<span>${esc(i.name)}</span></div></td><td>${money(i.unit_price)}</td><td>${i.qty}</td><td>${money(i.line_total)}</td></tr>`).join('')}
           <tr><td colspan="3" class="muted">${t('Delivery')}</td><td>${money(o.delivery_fee)}</td></tr>
           <tr><td colspan="3"><strong>${t('Total')}</strong></td><td><strong>${money(o.total)}</strong></td></tr>
         </table>
@@ -2989,7 +3610,13 @@ async function renderProducts(view) {
           <label>${t('Price per pack ({currency})', { currency: esc(state.config.currency) })}<input name="price" inputmode="decimal" dir="ltr" required value="${e.price != null ? (e.price / 100).toFixed(2) : ''}"></label>
           <label>${t('Stock (packs)')}<input name="stock" inputmode="numeric" dir="ltr" required value="${val('stock', 0)}"></label>
           <label>${t('Minimum order')}<input name="min_order_qty" inputmode="numeric" dir="ltr" required value="${val('min_order_qty', 1)}"></label>
+          <label>${t('Barcode')}<input name="barcode" inputmode="numeric" dir="ltr" value="${val('barcode')}" placeholder="6221234567890"></label>
         </div>
+        ${e.id ? `<div class="row photo-edit">${thumb(e, 'lg')}
+          <label class="btn" for="prodPhoto">${ICON.camera}<span>${t(e.image_url ? 'Change photo' : 'Add photo')}</span></label>
+          <input type="file" id="prodPhoto" accept="image/*" hidden>
+          ${e.image_url ? `<button type="button" class="link danger" id="delPhoto">${t('Remove photo')}</button>` : ''}
+        </div>` : `<p class="small muted">${t('You can add a photo after saving the product.')}</p>`}
         <div class="row">
           <label class="check"><input type="checkbox" name="cold_chain" ${e.cold_chain ? 'checked' : ''}> ${t('Needs cold chain')}</label>
           <label class="check"><input type="checkbox" name="active" ${!e.id || e.active ? 'checked' : ''}> ${t('Listed for sale')}</label>
@@ -3005,9 +3632,9 @@ async function renderProducts(view) {
         <tr><th>${t('Product')}</th><th>${t('SKU')}</th><th>${t('Price')}</th><th>${t('Stock')}</th><th>${t('Min')}</th><th>${t('Status')}</th><th></th></tr>
         ${products.map((p) => `
           <tr data-search="${esc([p.name, p.generic_name, p.sku].join(' ').toLowerCase())}">
-            <td><strong>${esc(p.name)}</strong> <span class="small muted">${esc([p.strength, p.form, p.pack_size].filter(Boolean).join(' · '))}</span>
-              ${p.cold_chain ? ` <span class="tag cold">${t('Cold')}</span>` : ''}</td>
-            <td class="small">${ltr(p.sku)}</td>
+            <td><div class="with-thumb">${thumb(p, 'sm')}<div><strong>${nm(p.name)}</strong> <span class="small muted">${esc([p.strength, p.form, p.pack_size].filter(Boolean).join(' · '))}</span>
+              ${p.cold_chain ? ` <span class="tag cold">${t('Cold')}</span>` : ''}</div></div></td>
+            <td class="small">${ltr(p.sku)}${p.barcode ? `<div class="muted">${ltr(p.barcode)}</div>` : ''}</td>
             <td>${money(p.price)}</td>
             <td>${p.stock}${p.stock < 20 ? ` <span class="small warn-text">${t('low')}</span>` : ''}</td>
             <td>${p.min_order_qty}</td>
@@ -3034,6 +3661,18 @@ async function renderProducts(view) {
       render();
     });
     $('#cancelEdit', view).onclick = () => { renderProducts.editing = null; render(); };
+    const photo = $('#prodPhoto', view);
+    if (photo) {
+      photo.onchange = action(async (ev) => {
+        const file = ev.target.files[0];
+        if (!file) return;
+        await api('PUT', `/api/supplier/products/${e.id}/image`, { data_url: await shrinkImage(file, 600, 0.82) });
+        toast(t('Photo saved'));
+        render();
+      });
+      const del = $('#delPhoto', view);
+      if (del) del.onclick = action(async () => { await api('DELETE', `/api/supplier/products/${e.id}/image`); toast(t('Photo removed')); render(); });
+    }
   }
   $$('[data-edit]', view).forEach((b) => {
     b.onclick = () => { renderProducts.editing = Number(b.dataset.edit); render(); window.scrollTo(0, 0); };
@@ -3049,17 +3688,20 @@ async function renderProducts(view) {
 const FIELD_LABEL = {
   sku: 'Product code (SKU)', name: 'Brand name', generic_name: 'Generic name', category: 'Category', form: 'Form', strength: 'Strength',
   pack_size: 'Pack size', price: 'Price', stock: 'Stock', min_order_qty: 'Minimum order', cold_chain: 'Needs cold chain', active: 'Listed for sale',
+  barcode: 'Barcode', image_url: 'Photo link',
 };
 const IMPORT_ERROR = {
   missing_columns: 'Required columns are missing: {value}', missing_sku: 'Product code is empty', duplicate_sku: 'Product code {value} appears more than once',
   missing_name: 'Brand name is empty', bad_price: 'Price is not a valid amount: {value}', bad_stock: 'Quantity must be a whole number, 0 or more',
   bad_min: 'Minimum order must be a whole number, 1 or more', bad_yes_no: 'Must be yes or no', empty: 'The file has no product rows',
   too_many_rows: 'At most {value} rows per file', not_a_list: 'The data is not in the expected format',
+  bad_barcode: 'Barcode must be 8 to 14 digits: {value}', duplicate_barcode: 'Barcode {value} appears more than once',
+  bad_image_url: 'Photo link must start with https://',
 };
 const importError = (e) => t(IMPORT_ERROR[e.code] || e.message, {
   value: e.code === 'missing_columns' ? String(e.value).split(', ').map((f) => t(FIELD_LABEL[f] || f)).join('، ') : esc(e.value ?? ''),
 });
-const fieldValue = (f, v) => (f === 'price' ? money(v) : f === 'cold_chain' || f === 'active' ? t(v ? 'Yes' : 'No') : esc(v ?? '—'));
+const fieldValue = (f, v) => (f === 'image_url' ? t(v ? 'New photo' : 'No photo') : f === 'price' ? money(v) : f === 'cold_chain' || f === 'active' ? t(v ? 'Yes' : 'No') : esc(v ?? '—'));
 
 /** Rows read from an uploaded file (or the sample), kept while the preview is open. */
 const importState = { rows: null, fileName: null, hideMissing: false, skipErrors: false, result: null };
@@ -3151,15 +3793,15 @@ async function renderImport(view) {
           <details class="small" open><summary><strong>${t('Changes to existing products')}</strong></summary>
             <div class="table-wrap"><table>
               <tr><th>${t('Product')}</th><th>${t('Change')}</th></tr>
-              ${r.update.slice(0, 50).map((u) => `<tr><td>${esc(u.name)} <span class="muted">${ltr(u.sku)}</span></td>
+              ${r.update.slice(0, 50).map((u) => `<tr><td>${nm(u.name)} <span class="muted">${ltr(u.sku)}</span></td>
                 <td>${Object.keys(u.changes).map((f) => `${t(FIELD_LABEL[f] || f)}: <span class="muted">${fieldValue(f, u.before[f])}</span> ${I18N.lang === 'ar' ? '←' : '→'} <strong>${fieldValue(f, u.changes[f])}</strong>`).join('<br>')}</td></tr>`).join('')}
             </table></div></details>` : ''}
         ${r.create.length ? `
           <details class="small"><summary><strong>${t('New products')} (${s.created})</strong></summary>
-            <ul class="plain">${r.create.slice(0, 50).map((c) => `<li>${esc(c.name)} · ${ltr(c.sku)} · ${money(c.price)}</li>`).join('')}</ul></details>` : ''}
+            <ul class="plain">${r.create.slice(0, 50).map((c) => `<li>${nm(c.name)} · ${ltr(c.sku)} · ${money(c.price)}</li>`).join('')}</ul></details>` : ''}
         ${r.hide.length ? `
           <details class="small"><summary><strong>${t('Products that will be hidden')} (${s.hidden})</strong></summary>
-            <ul class="plain">${r.hide.slice(0, 50).map((c) => `<li>${esc(c.name)} · ${ltr(c.sku || '')}</li>`).join('')}</ul></details>` : ''}
+            <ul class="plain">${r.hide.slice(0, 50).map((c) => `<li>${nm(c.name)} · ${ltr(c.sku || '')}</li>`).join('')}</ul></details>` : ''}
         <label class="check"><input type="checkbox" id="hideMissing" ${st.hideMissing ? 'checked' : ''}> ${t('Hide my products that are not in this file (they stop being sold, nothing is deleted)')}</label>
         ${s.errors && !fatal ? `<label class="check"><input type="checkbox" id="skipErrors" ${st.skipErrors ? 'checked' : ''}> ${t('Skip the rows with errors and save the rest')}</label>` : ''}
         <div class="row">
@@ -3208,7 +3850,7 @@ async function renderImport(view) {
     sample.onclick = action(async () => {
       // A realistic update: new prices and stock for some products, one new product, one mistake.
       const h = MaaImport.TEMPLATE_HEADERS;
-      const row = (p) => ({ [h[0]]: p.sku, [h[1]]: p.name, [h[2]]: p.generic_name || '', [h[3]]: p.category || '', [h[4]]: p.form || '', [h[5]]: p.strength || '', [h[6]]: p.pack_size || '', [h[7]]: (p.price / 100).toFixed(2), [h[8]]: String(p.stock), [h[9]]: String(p.min_order_qty), [h[10]]: p.cold_chain ? 'نعم' : 'لا' });
+      const row = (p) => ({ [h[0]]: p.sku, [h[1]]: p.name, [h[2]]: p.generic_name || '', [h[3]]: p.category || '', [h[4]]: p.form || '', [h[5]]: p.strength || '', [h[6]]: p.pack_size || '', [h[7]]: (p.price / 100).toFixed(2), [h[8]]: String(p.stock), [h[9]]: String(p.min_order_qty), [h[10]]: p.cold_chain ? 'نعم' : 'لا', [h[11]]: p.barcode || '' });
       st.rows = products.filter((p) => p.active).map((p, i) => (i < 3 ? row({ ...p, price: Math.round(p.price * 1.05), stock: p.stock + 100 }) : row(p)));
       st.rows.push(row({ sku: 'NEW-FUC-15', name: 'Fucidin', generic_name: 'Fusidic acid', category: 'مضادات حيوية', form: 'كريم', strength: '2%', pack_size: 'أنبوب 15 غ', price: 2200, stock: 80, min_order_qty: 5 }));
       st.rows.push({ ...row({ sku: 'NEW-ERR-1', name: 'Vitamin C', price: 0, stock: 10, min_order_qty: 1 }), [h[7]]: 'غير معروف' });
@@ -3226,7 +3868,7 @@ async function renderImport(view) {
       XLSX.writeFile(wb, name);
     };
     $('#tpl', view).onclick = () => save([MaaImport.TEMPLATE_HEADERS, MaaImport.TEMPLATE_EXAMPLE], 'maa-products-template.xlsx');
-    $('#export', view).onclick = () => save([MaaImport.TEMPLATE_HEADERS, ...products.map((p) => [p.sku, p.name, p.generic_name, p.category, p.form, p.strength, p.pack_size, (p.price / 100).toFixed(2), p.stock, p.min_order_qty, p.cold_chain ? 'نعم' : 'لا'])], 'maa-products.xlsx');
+    $('#export', view).onclick = () => save([MaaImport.TEMPLATE_HEADERS, ...products.map((p) => [p.sku, p.name, p.generic_name, p.category, p.form, p.strength, p.pack_size, (p.price / 100).toFixed(2), p.stock, p.min_order_qty, p.cold_chain ? 'نعم' : 'لا', p.barcode || '', /^https:/.test(p.image_url || '') ? p.image_url : ''])], 'maa-products.xlsx');
   }
 
   if (st.result) drawPreview();
@@ -3459,6 +4101,7 @@ function renderGuide() {
         ${done ? `<div class="row guide-done"><span>${t('Done! The order was delivered. Try another order, or open the admin page.')}</span>
           <button class="primary small-btn" id="restart">${t('Start a new order')}</button></div>` : ''}
         <div class="row small also"><span class="muted">${t('Also try:')}</span>
+          <button class="link" data-also-pharmacy="new">${t('Pharmacy: order by photo or barcode')}</button>
           <button class="link" data-also="import">${t('Company: update products from Excel')}</button>
           <button class="link" data-also="settings">${t('Company: payment options')}</button></div>`}
       <div class="switch">
@@ -3473,6 +4116,7 @@ function renderGuide() {
   $('#resetDemo', el).onclick = () => window.maaResetDemo();
   $$('[data-switch]', el).forEach((b) => { b.onclick = action(() => switchTo(b.dataset.switch)); });
   $$('[data-also]', el).forEach((b) => { b.onclick = action(() => switchTo('supplier@maa.test', `#${b.dataset.also}`)); });
+  $$('[data-also-pharmacy]', el).forEach((b) => { b.onclick = action(() => switchTo('pharmacy@maa.test', `#${b.dataset.alsoPharmacy}`)); });
   const go = $('#goStep', el);
   if (go) {
     const s = GUIDE_STEPS[index];

@@ -26,7 +26,7 @@ const MODULES = [
   'src/http', 'src/store', 'src/validate', 'src/policy', 'src/seed',
   'src/routes/index', 'src/routes/auth', 'src/routes/catalog', 'src/routes/supplier',
   'src/routes/orders', 'src/routes/deliveries', 'src/routes/admin',
-  'shared/payment', 'shared/import',
+  'shared/payment', 'shared/import', 'shared/recognize',
 ];
 const SWAP = { 'src/auth': 'standalone/auth-browser' };
 
@@ -72,6 +72,9 @@ for (const leftover of ['src="shared/', 'src="i18n.js"', 'src="app.js"', 'href="
 
 const out = path.join(__dirname, 'maa-demo.html');
 fs.writeFileSync(out, html);
+// Pack photos sit next to the page (img/products/...), as on the real server.
+const imgSrc = path.join(root, 'public', 'img');
+fs.cpSync(imgSrc, path.join(__dirname, 'img'), { recursive: true });
 console.log(`Wrote ${path.relative(root, out)} (${(html.length / 1024).toFixed(0)} KB)`);
 
 if (process.argv[2]) {

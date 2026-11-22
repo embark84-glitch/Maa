@@ -15,6 +15,7 @@
   --good-bg: #dcfae6; --good-fg: #085d3a;
   --cold-bg: #e0f2fe; --cold-fg: #075985;
   --toast-bg: #15201f; --toast-fg: #ffffff;
+  --ph-l: 90%; --ph-t: 28%; --overlay: rgb(10 20 19 / .45);
   --radius: 10px;
   font-family: "IBM Plex Sans Arabic", system-ui, -apple-system, "Segoe UI", Tahoma, "Noto Sans Arabic", sans-serif;
 }
@@ -27,6 +28,7 @@ bdi[dir="ltr"] { unicode-bidi: isolate; }
     --pending-bg: #4a2a0a; --pending-fg: #fec84b; --bad-bg: #55160c; --bad-fg: #fda29b;
     --good-bg: #053321; --good-fg: #75e0a7; --cold-bg: #0b2a3d; --cold-fg: #7cd4fd;
     --toast-bg: #e6eeed; --toast-fg: #0f1514;
+    --ph-l: 24%; --ph-t: 82%; --overlay: rgb(0 0 0 / .6);
     color-scheme: dark;
   }
 }
@@ -36,6 +38,7 @@ bdi[dir="ltr"] { unicode-bidi: isolate; }
   --pending-bg: #4a2a0a; --pending-fg: #fec84b; --bad-bg: #55160c; --bad-fg: #fda29b;
   --good-bg: #053321; --good-fg: #75e0a7; --cold-bg: #0b2a3d; --cold-fg: #7cd4fd;
   --toast-bg: #e6eeed; --toast-fg: #0f1514;
+  --ph-l: 24%; --ph-t: 82%; --overlay: rgb(0 0 0 / .6);
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -268,3 +271,39 @@ fieldset.pay-options legend + * { clear: both; }
   .progress li { font-size: .7rem; }
   .kv { grid-template-columns: 1fr auto; }
 }
+
+/* ---------- v4: photos, order by photo, barcode scanning ---------- */
+.thumb { width: 56px; height: 56px; border-radius: 10px; object-fit: cover; flex: none; background: var(--bg); border: 1px solid var(--line); }
+.thumb.sm { width: 40px; height: 40px; border-radius: 8px; }
+.thumb.lg { width: 96px; height: 96px; }
+.thumb.ph { display: grid; place-items: center; font-weight: 700; font-size: .95rem; letter-spacing: .02em;
+  background: hsl(var(--h) 45% var(--ph-l)); color: hsl(var(--h) 50% var(--ph-t)); border-color: transparent; }
+.thumb.sm.ph { font-size: .75rem; }
+.with-thumb { display: flex; align-items: center; gap: .6rem; min-width: 0; }
+.photo-edit { align-items: center; }
+
+.quick-add { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; margin-bottom: .6rem; }
+.tool { display: flex; align-items: center; justify-content: center; gap: .45rem; padding: .7rem .8rem; font-weight: 600;
+  background: var(--brand-soft); color: var(--brand); border: 1px solid transparent; border-radius: 10px; cursor: pointer; text-align: center; }
+.tool:hover, .tool:focus-visible { border-color: var(--brand); }
+label.btn { display: inline-flex; align-items: center; gap: .4rem; cursor: pointer; }
+.prow.flash { animation: flash 1.2s ease-out; }
+@keyframes flash { 0% { background: var(--brand-soft); } 100% { background: var(--surface); } }
+@media (prefers-reduced-motion: reduce) { .prow.flash { animation: none; } }
+
+.sheet-back { position: fixed; inset: 0; z-index: 50; background: var(--overlay); display: grid; place-items: end center; }
+.sheet { background: var(--surface); color: var(--text); width: min(640px, 100%); max-height: 92vh; overflow-y: auto;
+  border-radius: 16px 16px 0 0; display: grid; gap: .8rem; padding-block: 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+@media (min-width: 700px) { .sheet-back { place-items: center; } .sheet { border-radius: 16px; } }
+.sheet h2 { margin: 0; }
+.photo-wrap img { max-height: 180px; max-width: 100%; border-radius: 10px; display: block; margin-inline: auto; }
+.found-list { display: grid; gap: .45rem; }
+.found { display: flex; align-items: center; gap: .6rem; border: 1px solid var(--line); border-radius: 10px; padding: .5rem .6rem; color: var(--text); font-size: .95rem; }
+.found:has(input[type=checkbox]:checked) { border-color: var(--brand); background: var(--brand-soft); }
+.found input[type=checkbox] { width: auto; flex: none; }
+.found .pinfo { display: grid; gap: .1rem; }
+.qty-in { width: 4.5rem; text-align: center; font-weight: 700; flex: none; }
+.scan-wrap { position: relative; border-radius: 12px; overflow: hidden; background: #000; aspect-ratio: 4 / 3; max-width: 100%; }
+.scan-wrap video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scan-line { position: absolute; inset-inline: 10%; top: 50%; height: 2px; background: var(--danger); box-shadow: 0 0 8px var(--danger); }

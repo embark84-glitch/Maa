@@ -1,13 +1,13 @@
 'use strict';
-const { HttpError, requireRole } = require('../http');
+const { HttpError, requireRole, parseDataUrl } = require('../http');
 const { generateApiKey, hashApiKey } = require('../auth');
 const { getPolicy } = require('../policy');
 const { tx } = require('../store');
-const { normalizeProducts, planSync } = require('../../shared/import');
+const { normalizeProducts, planSync, toLatinDigits } = require('../../shared/import');
 const v = require('../validate');
 const { PRODUCT_COLS, shapeProduct } = require('./catalog');
 
-const EXISTING_COLS = 'id, sku, name, generic_name, category, form, strength, pack_size, price, stock, min_order_qty, cold_chain, active';
+const EXISTING_COLS = 'id, sku, name, generic_name, category, form, strength, pack_size, price, stock, min_order_qty, cold_chain, active, barcode, image_url';
 const LIST_LIMIT = 300; // rows of detail returned in a preview; the counts are always complete
 
 /**
@@ -36,11 +36,11 @@ function runImport(db, orgId, rows, { hideMissing = false, dryRun = true, skipEr
 
   const bool = (b) => (b ? 1 : 0);
   tx(db, () => {
-    const ins = db.prepare(`INSERT INTO products (supplier_id, sku, name, generic_name, category, form, strength, pack_size, price, stock, min_order_qty, cold_chain, active)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const ins = db.prepare(`INSERT INTO products (supplier_id, sku, name, generic_name, category, form, strength, pack_size, price, stock, min_order_qty, cold_chain, active, barcode, image_url)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     for (const p of plan.create) {
       ins.run(orgId, p.sku, p.name, p.generic_name ?? null, p.category ?? null, p.form ?? null, p.strength ?? null, p.pack_size ?? null,
-        p.price, p.stock ?? 0, p.min_order_qty ?? 1, bool(p.cold_chain), p.active === false ? 0 : 1);
+        p.price, p.stock ?? 0, p.min_order_qty ?? 1, bool(p.cold_chain), p.active === false ? 0 : 1, p.barcode ?? null, p.image_url ?? null);
     }
     for (const u of plan.update) {
       const cols = Object.keys(u.changes);
@@ -78,6 +78,11 @@ module.exports = (app, { db }) => {
     take('min_order_qty', (x) => v.int(x ?? 1, 'min_order_qty', { min: 1, max: 100_000 }));
     take('cold_chain', (x) => (x ? 1 : 0));
     take('active', (x) => (x === undefined ? 1 : x ? 1 : 0));
+    take('barcode', (x) => {
+      const b = x == null || x === '' ? null : toLatinDigits(String(x)).replace(/[\s-]/g, '');
+      if (b !== null && !/^\d{8,14}$/.test(b)) throw new HttpError(400, 'Barcode must be 8 to 14 digits');
+      return b;
+    });
     return out;
   };
   const uniqueSku = (fn) => {
@@ -107,6 +112,32 @@ module.exports = (app, { db }) => {
       uniqueSku(() => db.prepare(`UPDATE products SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`).run(...Object.values(p), id));
       touch(req.user.org_id);
     }
+    res.json({ product: shapeProduct(db.prepare(`SELECT ${PRODUCT_COLS} FROM products p WHERE p.id = ?`).get(id)) });
+  });
+
+  /** Product photo: the browser shrinks it first; stored in the database and served publicly. */
+  const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+  app.put('/api/supplier/products/:id/image', supplierOnly, (req, res) => {
+    const id = v.int(req.params.id, 'id', { min: 1 });
+    if (!db.prepare('SELECT 1 FROM products WHERE id = ? AND supplier_id = ?').get(id, req.user.org_id)) throw new HttpError(404, 'Product not found');
+    const img = parseDataUrl(req.body?.data_url);
+    if (!img || !IMAGE_TYPES.includes(img.mime)) throw new HttpError(400, 'Upload a JPEG, PNG or WebP photo');
+    if (img.bytes.length > 600_000) throw new HttpError(413, 'Upload is too large');
+    tx(db, () => {
+      db.prepare(`INSERT INTO product_images (product_id, mime, data, updated_at) VALUES (?, ?, ?, datetime('now'))
+        ON CONFLICT(product_id) DO UPDATE SET mime = excluded.mime, data = excluded.data, updated_at = excluded.updated_at`).run(id, img.mime, img.bytes);
+      db.prepare('UPDATE products SET image_url = ? WHERE id = ?').run(`api/product-images/${id}?v=${Date.now()}`, id);
+    });
+    res.json({ product: shapeProduct(db.prepare(`SELECT ${PRODUCT_COLS} FROM products p WHERE p.id = ?`).get(id)) });
+  });
+
+  app.delete('/api/supplier/products/:id/image', supplierOnly, (req, res) => {
+    const id = v.int(req.params.id, 'id', { min: 1 });
+    if (!db.prepare('SELECT 1 FROM products WHERE id = ? AND supplier_id = ?').get(id, req.user.org_id)) throw new HttpError(404, 'Product not found');
+    tx(db, () => {
+      db.prepare('DELETE FROM product_images WHERE product_id = ?').run(id);
+      db.prepare('UPDATE products SET image_url = NULL WHERE id = ?').run(id);
+    });
     res.json({ product: shapeProduct(db.prepare(`SELECT ${PRODUCT_COLS} FROM products p WHERE p.id = ?`).get(id)) });
   });
 

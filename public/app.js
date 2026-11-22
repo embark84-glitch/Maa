@@ -29,11 +29,52 @@ const money = (minor) => new Intl.NumberFormat(I18N.locale, { style: 'currency',
 const when = (iso) => new Date(iso.replace(' ', 'T') + (iso.length > 10 ? 'Z' : '')).toLocaleString(I18N.locale, iso.length > 10 ? { dateStyle: 'medium', timeStyle: 'short' } : { dateStyle: 'medium' });
 const day = (iso) => new Date(iso.slice(0, 10) + 'T00:00:00Z').toLocaleDateString(I18N.locale, { dateStyle: 'medium', timeZone: 'UTC' });
 const ltr = (s) => `<bdi dir="ltr">${esc(s)}</bdi>`;
+/** A product name keeps its own direction ("1-2-3" must not read "3-2-1" in Arabic). */
+const nm = (s) => `<bdi>${esc(s)}</bdi>`;
 const phone = (p) => (p ? `<div><a href="tel:${esc(p.replace(/\s+/g, ''))}">${ltr(p)}</a></div>` : '');
 /** Whole number from user input, accepting Arabic-Indic digits. NaN when not a whole number. */
 const toInt = (s) => { const n = MaaImport.parseNumber(String(s ?? '').trim()); return Number.isInteger(n) ? n : NaN; };
 /** Amount typed in dinars ("4,50", "٤٫٥") -> number of dinars, or NaN. */
 const toAmount = (s) => MaaImport.parseNumber(String(s ?? '').trim());
+
+// ---------------------------------------------------------------- product images
+
+const initials = (name) => String(name || '?').replace(/[^\p{L}\p{N} ]/gu, '').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
+const hue = (name) => [...String(name)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+/** A product's pack photo, or a coloured tile with its initials when there is none. */
+const thumb = (p, cls = '') => (p?.image_url
+  ? `<img class="thumb ${cls}" data-src="${esc(p.image_url)}" data-name="${esc(p.name)}" alt="" loading="lazy">`
+  : `<span class="thumb ph ${cls}" style="--h:${hue(p?.name)}" aria-hidden="true">${esc(initials(p?.name))}</span>`);
+
+/** Load images after rendering. In the demo, photos served by the in-browser server go through fetch. */
+function hydrateImages(root = document) {
+  for (const img of root.querySelectorAll('img[data-src]')) {
+    const url = img.dataset.src;
+    img.removeAttribute('data-src');
+    img.onerror = () => { img.outerHTML = thumb({ name: img.dataset.name }, img.className.replace('thumb', '').trim()); };
+    if (window.maaDemo && url.startsWith('api/')) {
+      fetch(`/${url}`).then((r) => (r.ok ? r.blob() : Promise.reject())).then((b) => { img.src = URL.createObjectURL(b); }).catch(() => img.onerror());
+    } else {
+      img.src = url;
+    }
+  }
+}
+
+/** Shrink a photo before sending it: longest side `max` px, JPEG. Resolves a data: URL. */
+async function shrinkImage(file, max = 1600, quality = 0.85) {
+  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() => null);
+  const src = bitmap || await new Promise((resolve, reject) => {
+    const im = new Image(); im.onload = () => resolve(im); im.onerror = reject; im.src = URL.createObjectURL(file);
+  });
+  const w = src.width; const h = src.height;
+  const k = Math.min(1, max / Math.max(w, h));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(w * k); canvas.height = Math.round(h * k);
+  const g = canvas.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, canvas.width, canvas.height);
+  g.drawImage(src, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', quality);
+}
 
 const STATUS_LABEL = {
   placed: 'Awaiting company approval', accepted: 'Accepted by the company', rejected: 'Rejected', cancelled: 'Cancelled',
@@ -167,6 +208,7 @@ async function render() {
   if (!fn) { location.hash = HOME[u.role]; return; }
   view.innerHTML = `<p class="muted">${t('Loading…')}</p>`;
   try { await fn(view, param); } catch (e) { view.innerHTML = `<div class="card">${esc(e.message)}</div>`; }
+  hydrateImages(view);
   highlightStep();
 }
 
@@ -345,14 +387,20 @@ async function renderShop(view, sid) {
       <a href="#new" class="small">${t('Change company')}</a>
     </div>
     <div class="shop-tools">
-      <input id="q" class="search" type="search" placeholder="${t('Search by brand, generic name or SKU')}" aria-label="${t('Search')}">
+      <div class="quick-add">
+        <label class="btn tool" for="photoFile">${ICON.camera}<span>${t('Order by photo')}</span></label>
+        <input type="file" id="photoFile" accept="image/*" hidden>
+        <button class="tool" id="scanBtn">${ICON.barcode}<span>${t('Scan barcode')}</span></button>
+      </div>
+      <input id="q" class="search" type="search" enterkeyhint="search" placeholder="${t('Search by name, or scan a barcode')}" aria-label="${t('Search')}">
       ${categories.length > 1 ? `<div class="chips" id="cats"><button class="chip on" data-cat="">${t('All')}</button>${categories.map((c) => `<button class="chip" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : ''}
     </div>
     <div class="product-list" id="plist">
       ${products.map((p) => `
-        <div class="prow" data-pid="${p.id}" data-search="${esc([p.name, p.generic_name, p.sku].join(' ').toLowerCase())}" data-cat="${esc(p.category || '')}">
+        <div class="prow" data-pid="${p.id}" data-search="${esc([p.name, p.generic_name, p.sku, p.barcode].join(' ').toLowerCase())}" data-cat="${esc(p.category || '')}">
+          ${thumb(p)}
           <div class="pinfo">
-            <div><strong>${esc(p.name)}</strong> <span class="muted">${esc(p.strength || '')}</span>
+            <div><strong>${nm(p.name)}</strong> <span class="muted">${esc(p.strength || '')}</span>
               ${p.cold_chain ? `<span class="tag cold">${t('Cold chain')}</span>` : ''}</div>
             <div class="small muted">${esc([p.generic_name, p.form, p.pack_size].filter(Boolean).join(' · '))}</div>
             <div class="small"><span class="price">${money(p.price)}</span>
@@ -365,6 +413,8 @@ async function renderShop(view, sid) {
     <div class="cartbar" id="cartbar"></div>`;
 
   const byId = new Map(products.map((p) => [String(p.id), p]));
+  const byBarcode = new Map(products.filter((p) => p.barcode).map((p) => [p.barcode, p]));
+  const rowOf = (p) => $(`.prow[data-pid="${p.id}"]`, view);
   const problem = (p, q) => (q > 0 && q < p.min_order_qty ? t('Minimum order is {n}', { n: p.min_order_qty })
     : q > p.stock ? t('Only {n} in stock', { n: p.stock }) : '');
 
@@ -403,45 +453,283 @@ async function renderShop(view, sid) {
     highlightStep();
   };
 
-  const setQty = (row, q) => {
-    const p = byId.get(row.dataset.pid);
+  const setQty = (p, q) => {
     if (q > 0) draft[p.id] = q; else delete draft[p.id];
     saveDrafts();
-    drawRow(row); drawBar();
+    drawRow(rowOf(p)); drawBar();
+  };
+  const flash = (p) => {
+    const row = rowOf(p);
+    row.hidden = false;
+    row.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    row.classList.remove('flash'); void row.offsetWidth; row.classList.add('flash');
+  };
+  /** Add one scanned or recognised product: its minimum the first time, one more after that. */
+  const addOne = (p) => {
+    const cur = draft[p.id] || 0;
+    setQty(p, cur ? cur + 1 : p.min_order_qty);
+    flash(p);
+    return draft[p.id];
+  };
+
+  /** A scanned barcode: add it if this company sells it, otherwise say who does. */
+  const onBarcode = async (raw) => {
+    const code = MaaImport.toLatinDigits(String(raw)).replace(/\D/g, '');
+    const p = byBarcode.get(code);
+    if (p) {
+      const q = addOne(p);
+      toast(t('Added {name} · quantity {n}', { name: p.name, n: q }));
+      if (navigator.vibrate) navigator.vibrate(60);
+      return p;
+    }
+    const others = (await api('GET', `/api/products?barcode=${encodeURIComponent(code)}`).catch(() => ({ products: [] }))).products;
+    toast(others.length
+      ? t('{name} is not sold by this company. Available from: {companies}', { name: others[0].name, companies: [...new Set(others.map((o) => o.supplier_name))].join('، ') })
+      : t('No product with barcode {code}', { code }), true);
+    return null;
   };
 
   $$('.prow', view).forEach((row) => {
     drawRow(row);
     row.addEventListener('click', (e) => {
       const p = byId.get(row.dataset.pid);
-      if (e.target.closest('[data-add]')) { setQty(row, p.min_order_qty); $('[data-qty]', row)?.focus(); }
+      if (e.target.closest('[data-add]')) { setQty(p, p.min_order_qty); $('[data-qty]', row)?.focus(); }
       const step = e.target.closest('[data-step]');
       if (step) {
         const cur = draft[p.id] || 0;
         let next = cur + Number(step.dataset.step);
         if (next > 0 && next < p.min_order_qty) next = step.dataset.step < 0 ? 0 : p.min_order_qty;
-        setQty(row, Math.max(0, next));
+        setQty(p, Math.max(0, next));
       }
     });
     row.addEventListener('change', (e) => {
       if (!e.target.matches('[data-qty]')) return;
       const q = toInt(e.target.value);
       if (Number.isNaN(q) || q < 0) { toast(t('Enter a whole number'), true); drawRow(row); return; }
-      setQty(row, q);
+      setQty(byId.get(row.dataset.pid), q);
     });
   });
 
   let cat = '';
+  const search = $('#q', view);
   const filter = () => {
-    const q = $('#q', view).value.trim().toLowerCase();
+    const q = search.value.trim().toLowerCase();
     $$('.prow', view).forEach((r) => { r.hidden = (q && !r.dataset.search.includes(q)) || (cat && r.dataset.cat !== cat); });
   };
-  $('#q', view).oninput = filter;
+  search.oninput = filter;
+  // Handheld scanners type the code and press Enter.
+  search.onkeydown = (e) => {
+    if (e.key !== 'Enter') return;
+    const v = MaaImport.toLatinDigits(search.value.trim());
+    if (/^\d{8,14}$/.test(v)) { e.preventDefault(); onBarcode(v); search.value = ''; filter(); }
+  };
   $$('#cats [data-cat]', view).forEach((b) => {
     b.onclick = () => { cat = b.dataset.cat; $$('#cats [data-cat]', view).forEach((x) => x.classList.toggle('on', x === b)); filter(); };
   });
+
+  $('#scanBtn', view).onclick = () => openScanner(onBarcode);
+  $('#photoFile', view).onchange = (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (file) openPhotoOrder(s, file, { draft, byId, setQty, flash, drawBar });
+  };
   drawBar();
 }
+
+// ---------------------------------------------------------------- order by photo
+
+/** Send a photo, then let the pharmacist confirm what to add. Nothing is added without a tap. */
+async function openPhotoOrder(s, file, shop) {
+  const sheet = openSheet(`
+    <h2>${t('Order by photo')}</h2>
+    <div class="photo-wrap"><img id="photoPrev" alt="${t('Your photo')}"></div>
+    <div id="photoBody" class="stack"><p class="muted">${t('Reading the photo… this can take up to a minute.')}</p></div>`);
+  const prev = $('#photoPrev', sheet.el);
+  prev.src = URL.createObjectURL(file);
+  let result;
+  try {
+    const image = await shrinkImage(file);
+    result = await api('POST', `/api/suppliers/${s.id}/recognize`, { image });
+  } catch (e) {
+    if (!sheet.open()) return;
+    const code = e.details?.code;
+    $('#photoBody', sheet.el).innerHTML = `<p class="err">${esc(code === 'recognition_unavailable' ? t('Order by photo is not set up yet. Ask the Maa team to turn it on.')
+      : code === 'not_granted' ? t('Photo reading needs your permission to use Claude. Allow it and try again.') : e.message)}</p>
+      <div class="row"><button id="closeSheet">${t('Close')}</button></div>`;
+    $('#closeSheet', sheet.el).onclick = sheet.close;
+    return;
+  }
+  if (!sheet.open()) return;
+  const { matches, not_found: notFound } = result;
+  const body = $('#photoBody', sheet.el);
+  body.innerHTML = `
+    ${matches.length ? `<p>${t('Found {n} products from {company}. Check the quantities, then add them.', { n: matches.length, company: esc(s.name) })}</p>
+      <div class="found-list">${matches.map((m) => {
+        const p = m.product;
+        const q = m.quantity || shop.draft[p.id] || p.min_order_qty;
+        return `<label class="found ${m.confidence}">
+          <input type="checkbox" data-pick="${p.id}" ${m.confidence === 'low' ? '' : 'checked'}>
+          ${thumb(p, 'sm')}
+          <span class="pinfo"><strong>${nm(p.name)}</strong> <span class="small muted">${esc([p.strength, p.pack_size].filter(Boolean).join(' · '))}</span>
+            ${m.confidence !== 'high' ? `<span class="small warn-text">${t('Check this: read as “{seen}”', { seen: esc(m.name_seen) })}</span>` : ''}</span>
+          <input class="qty-in" data-pq="${p.id}" inputmode="numeric" value="${q}" aria-label="${t('Quantity')}">
+        </label>`;
+      }).join('')}</div>` : `<p>${t('No products from {company} were recognised in this photo.', { company: esc(s.name) })}</p>`}
+    ${notFound.length ? `<div class="small"><strong>${t('Not sold by this company:')}</strong> ${notFound.map(esc).join('، ')}</div>` : ''}
+    <div class="row">
+      ${matches.length ? `<button class="primary" id="addFound">${t('Add selected to the order')}</button>` : ''}
+      <button id="closeSheet">${t(matches.length ? 'Cancel' : 'Close')}</button>
+    </div>`;
+  hydrateImages(body);
+  $('#closeSheet', sheet.el).onclick = sheet.close;
+  const add = $('#addFound', sheet.el);
+  if (add) {
+    add.onclick = () => {
+      let n = 0;
+      for (const box of $$('[data-pick]:checked', sheet.el)) {
+        const p = shop.byId.get(box.dataset.pick);
+        const q = toInt($(`[data-pq="${p.id}"]`, sheet.el).value);
+        if (!(q > 0)) continue;
+        shop.setQty(p, Math.max(q, p.min_order_qty));
+        n += 1;
+      }
+      sheet.close();
+      toast(t('Added {n} products to the order', { n }));
+    };
+  }
+}
+
+// ---------------------------------------------------------------- barcode scanning
+
+const ZXING_URL = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
+const BARCODE_FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'];
+let zxingLoading;
+function loadZxing() {
+  if (window.ZXing) return Promise.resolve(window.ZXing);
+  zxingLoading ||= new Promise((resolve, reject) => {
+    const sc = document.createElement('script');
+    sc.src = ZXING_URL; sc.onload = () => resolve(window.ZXing); sc.onerror = () => { zxingLoading = null; reject(new Error('zxing')); };
+    document.head.append(sc);
+  });
+  return zxingLoading;
+}
+async function nativeDetector() {
+  if (!('BarcodeDetector' in window)) return null;
+  try {
+    const supported = await BarcodeDetector.getSupportedFormats();
+    const formats = BARCODE_FORMATS.filter((f) => supported.includes(f));
+    return formats.length ? new BarcodeDetector({ formats }) : null;
+  } catch { return null; }
+}
+
+/** Read a barcode from a still photo (works where the live camera is not allowed). */
+async function decodePhoto(file) {
+  const det = await nativeDetector();
+  if (det) {
+    const found = await det.detect(await createImageBitmap(file)).catch(() => []);
+    if (found[0]) return found[0].rawValue;
+  }
+  const ZX = await loadZxing();
+  const url = URL.createObjectURL(file);
+  try {
+    const r = await new ZX.BrowserMultiFormatReader().decodeFromImageUrl(url);
+    return r.getText();
+  } catch { return null; } finally { URL.revokeObjectURL(url); }
+}
+
+/** Live camera scanning, with a "photograph the barcode" fallback. */
+function openScanner(onCode) {
+  const sheet = openSheet(`
+    <h2>${t('Scan barcode')}</h2>
+    <div class="scan-wrap" id="scanWrap" hidden><video id="scanVideo" playsinline muted></video><span class="scan-line"></span></div>
+    <p class="small muted" id="scanMsg">${t('Starting the camera…')}</p>
+    <div class="row">
+      <label class="btn" for="barPhoto">${ICON.camera}<span>${t('Photograph the barcode')}</span></label>
+      <input type="file" id="barPhoto" accept="image/*" capture="environment" hidden>
+      <button id="closeSheet">${t('Done')}</button>
+    </div>
+    <ul class="plain small" id="scanned"></ul>`);
+  const el = sheet.el;
+  const msg = $('#scanMsg', el);
+  let stream = null; let timer = null; let zxReader = null; let last = ''; let lastAt = 0;
+  const stop = () => {
+    clearInterval(timer);
+    zxReader?.reset();
+    stream?.getTracks().forEach((tr) => tr.stop());
+  };
+  sheet.onClose(stop);
+  $('#closeSheet', el).onclick = sheet.close;
+
+  const got = async (code) => {
+    if (!code || (code === last && Date.now() - lastAt < 2500)) return;
+    last = code; lastAt = Date.now();
+    const p = await onCode(code);
+    $('#scanned', el).insertAdjacentHTML('afterbegin', `<li>${p ? `✓ ${nm(p.name)}` : `<span class="err">✗ ${ltr(code)}</span>`}</li>`);
+  };
+
+  $('#barPhoto', el).onchange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    msg.textContent = t('Reading the barcode…');
+    try {
+      const code = await decodePhoto(file);
+      msg.textContent = code ? t('Barcode read: {code}', { code }) : t('No barcode found. Hold the phone closer, in good light, and try again.');
+      if (code) got(code);
+    } catch {
+      msg.textContent = t('The barcode reader did not load. Check the internet connection.');
+    }
+  };
+
+  (async () => {
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error('no camera');
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      if (!sheet.open()) { stop(); return; }
+      const video = $('#scanVideo', el);
+      video.srcObject = stream;
+      await video.play();
+      $('#scanWrap', el).hidden = false;
+      msg.textContent = t('Point the camera at the barcode on the pack.');
+      const det = await nativeDetector();
+      if (det) {
+        timer = setInterval(async () => {
+          const found = await det.detect(video).catch(() => []);
+          if (found[0]) got(found[0].rawValue);
+        }, 250);
+      } else {
+        const ZX = await loadZxing();
+        zxReader = new ZX.BrowserMultiFormatReader();
+        stream.getTracks().forEach((tr) => tr.stop()); // ZXing opens its own stream
+        zxReader.decodeFromConstraints({ video: { facingMode: 'environment' } }, video, (r) => { if (r) got(r.getText()); });
+      }
+    } catch {
+      if (sheet.open()) msg.textContent = t('The camera is not available here. Photograph the barcode instead, or use a handheld scanner in the search box.');
+    }
+  })();
+}
+
+// ---------------------------------------------------------------- bottom sheet
+
+/** A simple modal panel. Returns { el, close, open(), onClose(fn) }. */
+function openSheet(html) {
+  const back = document.createElement('div');
+  back.className = 'sheet-back';
+  back.innerHTML = `<div class="sheet" role="dialog" aria-modal="true">${html}</div>`;
+  document.body.append(back);
+  let isOpen = true; const closers = [];
+  const close = () => { if (!isOpen) return; isOpen = false; closers.forEach((f) => f()); back.remove(); document.removeEventListener('keydown', esc_); };
+  const esc_ = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', esc_);
+  back.addEventListener('click', (e) => { if (e.target === back) close(); });
+  setTimeout(() => back.querySelector('button, [href], input, label.btn')?.focus(), 0);
+  return { el: back.querySelector('.sheet'), close, open: () => isOpen, onClose: (f) => closers.push(f) };
+}
+
+const ICON = {
+  camera: '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>',
+  barcode: '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6v12M7 6v12M11 6v12M14 6v12M17 6v12M20 6v12"/></svg>',
+};
 
 async function renderCheckout(view, sid) {
   const { supplier: s, products } = await api('GET', `/api/suppliers/${sid}`);
@@ -473,8 +761,8 @@ async function renderCheckout(view, sid) {
           <div class="row spread"><h2>${esc(s.name)}</h2><a href="#shop-${sid}" class="small">${t('Edit items')}</a></div>
           <div class="table-wrap"><table>
             <tr><th>${t('Product')}</th><th>${t('Qty')}</th><th>${t('Total')}</th></tr>
-            ${lines.map((l) => `<tr><td>${esc(l.p.name)} <span class="small muted">${esc([l.p.strength, l.p.pack_size].filter(Boolean).join(' · '))}</span>
-              <div class="small muted">${money(l.p.price)}</div></td><td>${l.q}</td><td>${money(l.p.price * l.q)}</td></tr>`).join('')}
+            ${lines.map((l) => `<tr><td><div class="with-thumb">${thumb(l.p, 'sm')}<div>${nm(l.p.name)} <span class="small muted">${esc([l.p.strength, l.p.pack_size].filter(Boolean).join(' · '))}</span>
+              <div class="small muted">${money(l.p.price)}</div></div></div></td><td>${l.q}</td><td>${money(l.p.price * l.q)}</td></tr>`).join('')}
           </table></div>
           <div class="totals">
             <div class="row spread"><span>${t('Products')}</span><span>${money(subtotal)}</span></div>
@@ -704,7 +992,7 @@ async function renderOrderDetail(view, id) {
         <h2>${t('Items')}</h2>
         <table>
           <tr><th>${t('Product')}</th><th>${t('Unit')}</th><th>${t('Qty')}</th><th>${t('Total')}</th></tr>
-          ${o.items.map((i) => `<tr><td>${esc(i.name)}</td><td>${money(i.unit_price)}</td><td>${i.qty}</td><td>${money(i.line_total)}</td></tr>`).join('')}
+          ${o.items.map((i) => `<tr><td><div class="with-thumb">${thumb(i, 'sm')}<span>${esc(i.name)}</span></div></td><td>${money(i.unit_price)}</td><td>${i.qty}</td><td>${money(i.line_total)}</td></tr>`).join('')}
           <tr><td colspan="3" class="muted">${t('Delivery')}</td><td>${money(o.delivery_fee)}</td></tr>
           <tr><td colspan="3"><strong>${t('Total')}</strong></td><td><strong>${money(o.total)}</strong></td></tr>
         </table>
@@ -817,7 +1105,13 @@ async function renderProducts(view) {
           <label>${t('Price per pack ({currency})', { currency: esc(state.config.currency) })}<input name="price" inputmode="decimal" dir="ltr" required value="${e.price != null ? (e.price / 100).toFixed(2) : ''}"></label>
           <label>${t('Stock (packs)')}<input name="stock" inputmode="numeric" dir="ltr" required value="${val('stock', 0)}"></label>
           <label>${t('Minimum order')}<input name="min_order_qty" inputmode="numeric" dir="ltr" required value="${val('min_order_qty', 1)}"></label>
+          <label>${t('Barcode')}<input name="barcode" inputmode="numeric" dir="ltr" value="${val('barcode')}" placeholder="6221234567890"></label>
         </div>
+        ${e.id ? `<div class="row photo-edit">${thumb(e, 'lg')}
+          <label class="btn" for="prodPhoto">${ICON.camera}<span>${t(e.image_url ? 'Change photo' : 'Add photo')}</span></label>
+          <input type="file" id="prodPhoto" accept="image/*" hidden>
+          ${e.image_url ? `<button type="button" class="link danger" id="delPhoto">${t('Remove photo')}</button>` : ''}
+        </div>` : `<p class="small muted">${t('You can add a photo after saving the product.')}</p>`}
         <div class="row">
           <label class="check"><input type="checkbox" name="cold_chain" ${e.cold_chain ? 'checked' : ''}> ${t('Needs cold chain')}</label>
           <label class="check"><input type="checkbox" name="active" ${!e.id || e.active ? 'checked' : ''}> ${t('Listed for sale')}</label>
@@ -833,9 +1127,9 @@ async function renderProducts(view) {
         <tr><th>${t('Product')}</th><th>${t('SKU')}</th><th>${t('Price')}</th><th>${t('Stock')}</th><th>${t('Min')}</th><th>${t('Status')}</th><th></th></tr>
         ${products.map((p) => `
           <tr data-search="${esc([p.name, p.generic_name, p.sku].join(' ').toLowerCase())}">
-            <td><strong>${esc(p.name)}</strong> <span class="small muted">${esc([p.strength, p.form, p.pack_size].filter(Boolean).join(' · '))}</span>
-              ${p.cold_chain ? ` <span class="tag cold">${t('Cold')}</span>` : ''}</td>
-            <td class="small">${ltr(p.sku)}</td>
+            <td><div class="with-thumb">${thumb(p, 'sm')}<div><strong>${nm(p.name)}</strong> <span class="small muted">${esc([p.strength, p.form, p.pack_size].filter(Boolean).join(' · '))}</span>
+              ${p.cold_chain ? ` <span class="tag cold">${t('Cold')}</span>` : ''}</div></div></td>
+            <td class="small">${ltr(p.sku)}${p.barcode ? `<div class="muted">${ltr(p.barcode)}</div>` : ''}</td>
             <td>${money(p.price)}</td>
             <td>${p.stock}${p.stock < 20 ? ` <span class="small warn-text">${t('low')}</span>` : ''}</td>
             <td>${p.min_order_qty}</td>
@@ -862,6 +1156,18 @@ async function renderProducts(view) {
       render();
     });
     $('#cancelEdit', view).onclick = () => { renderProducts.editing = null; render(); };
+    const photo = $('#prodPhoto', view);
+    if (photo) {
+      photo.onchange = action(async (ev) => {
+        const file = ev.target.files[0];
+        if (!file) return;
+        await api('PUT', `/api/supplier/products/${e.id}/image`, { data_url: await shrinkImage(file, 600, 0.82) });
+        toast(t('Photo saved'));
+        render();
+      });
+      const del = $('#delPhoto', view);
+      if (del) del.onclick = action(async () => { await api('DELETE', `/api/supplier/products/${e.id}/image`); toast(t('Photo removed')); render(); });
+    }
   }
   $$('[data-edit]', view).forEach((b) => {
     b.onclick = () => { renderProducts.editing = Number(b.dataset.edit); render(); window.scrollTo(0, 0); };
@@ -877,17 +1183,20 @@ async function renderProducts(view) {
 const FIELD_LABEL = {
   sku: 'Product code (SKU)', name: 'Brand name', generic_name: 'Generic name', category: 'Category', form: 'Form', strength: 'Strength',
   pack_size: 'Pack size', price: 'Price', stock: 'Stock', min_order_qty: 'Minimum order', cold_chain: 'Needs cold chain', active: 'Listed for sale',
+  barcode: 'Barcode', image_url: 'Photo link',
 };
 const IMPORT_ERROR = {
   missing_columns: 'Required columns are missing: {value}', missing_sku: 'Product code is empty', duplicate_sku: 'Product code {value} appears more than once',
   missing_name: 'Brand name is empty', bad_price: 'Price is not a valid amount: {value}', bad_stock: 'Quantity must be a whole number, 0 or more',
   bad_min: 'Minimum order must be a whole number, 1 or more', bad_yes_no: 'Must be yes or no', empty: 'The file has no product rows',
   too_many_rows: 'At most {value} rows per file', not_a_list: 'The data is not in the expected format',
+  bad_barcode: 'Barcode must be 8 to 14 digits: {value}', duplicate_barcode: 'Barcode {value} appears more than once',
+  bad_image_url: 'Photo link must start with https://',
 };
 const importError = (e) => t(IMPORT_ERROR[e.code] || e.message, {
   value: e.code === 'missing_columns' ? String(e.value).split(', ').map((f) => t(FIELD_LABEL[f] || f)).join('، ') : esc(e.value ?? ''),
 });
-const fieldValue = (f, v) => (f === 'price' ? money(v) : f === 'cold_chain' || f === 'active' ? t(v ? 'Yes' : 'No') : esc(v ?? '—'));
+const fieldValue = (f, v) => (f === 'image_url' ? t(v ? 'New photo' : 'No photo') : f === 'price' ? money(v) : f === 'cold_chain' || f === 'active' ? t(v ? 'Yes' : 'No') : esc(v ?? '—'));
 
 /** Rows read from an uploaded file (or the sample), kept while the preview is open. */
 const importState = { rows: null, fileName: null, hideMissing: false, skipErrors: false, result: null };
@@ -979,15 +1288,15 @@ async function renderImport(view) {
           <details class="small" open><summary><strong>${t('Changes to existing products')}</strong></summary>
             <div class="table-wrap"><table>
               <tr><th>${t('Product')}</th><th>${t('Change')}</th></tr>
-              ${r.update.slice(0, 50).map((u) => `<tr><td>${esc(u.name)} <span class="muted">${ltr(u.sku)}</span></td>
+              ${r.update.slice(0, 50).map((u) => `<tr><td>${nm(u.name)} <span class="muted">${ltr(u.sku)}</span></td>
                 <td>${Object.keys(u.changes).map((f) => `${t(FIELD_LABEL[f] || f)}: <span class="muted">${fieldValue(f, u.before[f])}</span> ${I18N.lang === 'ar' ? '←' : '→'} <strong>${fieldValue(f, u.changes[f])}</strong>`).join('<br>')}</td></tr>`).join('')}
             </table></div></details>` : ''}
         ${r.create.length ? `
           <details class="small"><summary><strong>${t('New products')} (${s.created})</strong></summary>
-            <ul class="plain">${r.create.slice(0, 50).map((c) => `<li>${esc(c.name)} · ${ltr(c.sku)} · ${money(c.price)}</li>`).join('')}</ul></details>` : ''}
+            <ul class="plain">${r.create.slice(0, 50).map((c) => `<li>${nm(c.name)} · ${ltr(c.sku)} · ${money(c.price)}</li>`).join('')}</ul></details>` : ''}
         ${r.hide.length ? `
           <details class="small"><summary><strong>${t('Products that will be hidden')} (${s.hidden})</strong></summary>
-            <ul class="plain">${r.hide.slice(0, 50).map((c) => `<li>${esc(c.name)} · ${ltr(c.sku || '')}</li>`).join('')}</ul></details>` : ''}
+            <ul class="plain">${r.hide.slice(0, 50).map((c) => `<li>${nm(c.name)} · ${ltr(c.sku || '')}</li>`).join('')}</ul></details>` : ''}
         <label class="check"><input type="checkbox" id="hideMissing" ${st.hideMissing ? 'checked' : ''}> ${t('Hide my products that are not in this file (they stop being sold, nothing is deleted)')}</label>
         ${s.errors && !fatal ? `<label class="check"><input type="checkbox" id="skipErrors" ${st.skipErrors ? 'checked' : ''}> ${t('Skip the rows with errors and save the rest')}</label>` : ''}
         <div class="row">
@@ -1036,7 +1345,7 @@ async function renderImport(view) {
     sample.onclick = action(async () => {
       // A realistic update: new prices and stock for some products, one new product, one mistake.
       const h = MaaImport.TEMPLATE_HEADERS;
-      const row = (p) => ({ [h[0]]: p.sku, [h[1]]: p.name, [h[2]]: p.generic_name || '', [h[3]]: p.category || '', [h[4]]: p.form || '', [h[5]]: p.strength || '', [h[6]]: p.pack_size || '', [h[7]]: (p.price / 100).toFixed(2), [h[8]]: String(p.stock), [h[9]]: String(p.min_order_qty), [h[10]]: p.cold_chain ? 'نعم' : 'لا' });
+      const row = (p) => ({ [h[0]]: p.sku, [h[1]]: p.name, [h[2]]: p.generic_name || '', [h[3]]: p.category || '', [h[4]]: p.form || '', [h[5]]: p.strength || '', [h[6]]: p.pack_size || '', [h[7]]: (p.price / 100).toFixed(2), [h[8]]: String(p.stock), [h[9]]: String(p.min_order_qty), [h[10]]: p.cold_chain ? 'نعم' : 'لا', [h[11]]: p.barcode || '' });
       st.rows = products.filter((p) => p.active).map((p, i) => (i < 3 ? row({ ...p, price: Math.round(p.price * 1.05), stock: p.stock + 100 }) : row(p)));
       st.rows.push(row({ sku: 'NEW-FUC-15', name: 'Fucidin', generic_name: 'Fusidic acid', category: 'مضادات حيوية', form: 'كريم', strength: '2%', pack_size: 'أنبوب 15 غ', price: 2200, stock: 80, min_order_qty: 5 }));
       st.rows.push({ ...row({ sku: 'NEW-ERR-1', name: 'Vitamin C', price: 0, stock: 10, min_order_qty: 1 }), [h[7]]: 'غير معروف' });
@@ -1054,7 +1363,7 @@ async function renderImport(view) {
       XLSX.writeFile(wb, name);
     };
     $('#tpl', view).onclick = () => save([MaaImport.TEMPLATE_HEADERS, MaaImport.TEMPLATE_EXAMPLE], 'maa-products-template.xlsx');
-    $('#export', view).onclick = () => save([MaaImport.TEMPLATE_HEADERS, ...products.map((p) => [p.sku, p.name, p.generic_name, p.category, p.form, p.strength, p.pack_size, (p.price / 100).toFixed(2), p.stock, p.min_order_qty, p.cold_chain ? 'نعم' : 'لا'])], 'maa-products.xlsx');
+    $('#export', view).onclick = () => save([MaaImport.TEMPLATE_HEADERS, ...products.map((p) => [p.sku, p.name, p.generic_name, p.category, p.form, p.strength, p.pack_size, (p.price / 100).toFixed(2), p.stock, p.min_order_qty, p.cold_chain ? 'نعم' : 'لا', p.barcode || '', /^https:/.test(p.image_url || '') ? p.image_url : ''])], 'maa-products.xlsx');
   }
 
   if (st.result) drawPreview();
@@ -1287,6 +1596,7 @@ function renderGuide() {
         ${done ? `<div class="row guide-done"><span>${t('Done! The order was delivered. Try another order, or open the admin page.')}</span>
           <button class="primary small-btn" id="restart">${t('Start a new order')}</button></div>` : ''}
         <div class="row small also"><span class="muted">${t('Also try:')}</span>
+          <button class="link" data-also-pharmacy="new">${t('Pharmacy: order by photo or barcode')}</button>
           <button class="link" data-also="import">${t('Company: update products from Excel')}</button>
           <button class="link" data-also="settings">${t('Company: payment options')}</button></div>`}
       <div class="switch">
@@ -1301,6 +1611,7 @@ function renderGuide() {
   $('#resetDemo', el).onclick = () => window.maaResetDemo();
   $$('[data-switch]', el).forEach((b) => { b.onclick = action(() => switchTo(b.dataset.switch)); });
   $$('[data-also]', el).forEach((b) => { b.onclick = action(() => switchTo('supplier@maa.test', `#${b.dataset.also}`)); });
+  $$('[data-also-pharmacy]', el).forEach((b) => { b.onclick = action(() => switchTo('pharmacy@maa.test', `#${b.dataset.alsoPharmacy}`)); });
   const go = $('#goStep', el);
   if (go) {
     const s = GUIDE_STEPS[index];

@@ -16,9 +16,9 @@ const { seed, DEMO_PASSWORD } = require('../src/seed');
 window.MaaPayment = require('../shared/payment');
 window.MaaImport = require('../shared/import');
 
-const STORE_KEY = 'maa.demo.sqlite.v3';
+const STORE_KEY = 'maa.demo.sqlite.v4';
 const CONFIG = { currency: 'LYD', deliveryFee: 1000 };
-const OLD_KEYS = ['maa.demo.db', 'maa.demo.db.v2', 'maa.cart'];
+const OLD_KEYS = ['maa.demo.db', 'maa.demo.db.v2', 'maa.cart', 'maa.demo.sqlite.v3'];
 
 // ---------- node:sqlite-style wrapper over sql.js ----------
 
@@ -93,6 +93,29 @@ function createRouter() {
   return { app, run, match };
 }
 
+// ---------- order by photo through the viewer's Claude ----------
+
+let samplePromise = null;
+const unavailable = () => new HttpError(503, 'Photo ordering is not set up on this server', { code: 'recognition_unavailable' });
+
+/** Same contract as src/recognize-claude.js: resolves Claude's JSON answer for the photo. */
+async function demoRecognize({ prompt, mime, bytes }) {
+  if (!window.claude?.use) throw unavailable();
+  const sample = await (samplePromise ||= window.claude.use('sample'));
+  if (!sample) throw unavailable();
+  const limits = await sample.limits().catch(() => null);
+  if (!limits?.images) throw unavailable();
+  try {
+    return await sample.json(prompt, { images: [new Blob([bytes], { type: mime })], modelTier: 'default', cache: false });
+  } catch (e) {
+    const code = e?.code;
+    if (code === 'not_granted' || code === 'sampling_disabled') throw new HttpError(403, 'Photo reading needs permission to use Claude', { code: 'not_granted' });
+    if (code === 'rate_limited') throw new HttpError(503, 'Photo reading is busy. Try again in a minute.', { code: 'recognition_busy' });
+    if (['images_unavailable', 'not_declared', 'capability_disabled', 'capability_removed'].includes(code)) throw unavailable();
+    throw new HttpError(422, 'This photo could not be read. Try a clearer photo.', { code: 'recognition_failed' });
+  }
+}
+
 // ---------- boot ----------
 
 let db = null;
@@ -121,7 +144,7 @@ const ready = (async () => {
     applySchema(db);
   }
   if (seed(db)) save();
-  const ctx = { db, secret: 'demo', ...CONFIG };
+  const ctx = { db, secret: 'demo', ...CONFIG, recognize: demoRecognize };
   router.attachUser = attachUser(ctx, verifyToken);
   registerRoutes(router.app, ctx);
 })();
@@ -149,9 +172,12 @@ async function handle(method, url, headers, bodyText) {
     get: (name) => headers.get(name),
   };
   const res = {
-    statusCode: 200, sent: false, payload: undefined,
+    statusCode: 200, sent: false, payload: undefined, binary: null, headers: {},
     status(code) { this.statusCode = code; return this; },
+    set(name, value) { this.headers[name.toLowerCase()] = value; return this; },
+    type(mime) { this.headers['content-type'] = mime; return this; },
     json(obj) { this.payload = obj; this.sent = true; return this; },
+    send(bytes) { this.binary = bytes; this.sent = true; return this; },
   };
   try {
     await router.run([router.attachUser], req, res);
@@ -161,6 +187,7 @@ async function handle(method, url, headers, bodyText) {
     await router.run(found.route.handlers, req, res);
     if (!res.sent) throw new Error(`No response from ${method} ${url.pathname}`);
     if (method !== 'GET') save();
+    if (res.binary) return new Response(res.binary, { status: res.statusCode, headers: res.headers });
     return reply(res.statusCode, res.payload);
   } catch (err) {
     if (!err.status) console.error(err);

@@ -65,7 +65,8 @@ function loadOrder(db, id, user) {
   if (!canSee) return null;
   // Only the receiving pharmacy ever sees the handover code.
   if (!(user.role === 'pharmacy' || user.role === 'admin')) delete o.delivery_code;
-  o.items = db.prepare('SELECT product_id, name, unit_price, qty, line_total FROM order_items WHERE order_id = ?').all(id);
+  o.items = db.prepare(`SELECT i.product_id, i.name, i.unit_price, i.qty, i.line_total, p.image_url
+    FROM order_items i LEFT JOIN products p ON p.id = i.product_id WHERE i.order_id = ?`).all(id);
   o.payments = user.role === 'driver' ? [] : db.prepare(`
     SELECT p.amount, p.method, p.reference, p.created_at, u.name AS recorded_by
       FROM order_payments p LEFT JOIN users u ON u.id = p.recorded_by WHERE p.order_id = ? ORDER BY p.id`).all(id);

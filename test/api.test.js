@@ -10,7 +10,18 @@ let server; let base;
 before(async () => {
   const db = openDb(':memory:');
   seed(db);
-  const app = createApp({ db, secret: 'test-secret', currency: 'LYD', deliveryFee: 1000 });
+  // Stand-in for Claude: reads the catalogue from the prompt and "sees" Actifed (qty 12),
+  // a made-up id, and one medicine this company does not sell.
+  const recognize = async ({ prompt, mime }) => {
+    if (mime !== 'image/jpeg') throw new Error('unexpected type');
+    const actifed = prompt.split('\n').find((l) => l.includes('Actifed'));
+    return { items: [
+      { product_id: actifed ? Number(actifed.split(' | ')[0]) : null, name_seen: 'Actifed Rhume', quantity: 12, confidence: 'high' },
+      { product_id: 99999, name_seen: 'Fake', quantity: null, confidence: 'low' },
+      { product_id: null, name_seen: 'Tabuvan 160 mg', quantity: null, confidence: 'medium' },
+    ] };
+  };
+  const app = createApp({ db, secret: 'test-secret', currency: 'LYD', deliveryFee: 1000, recognize });
   await new Promise((r) => { server = app.listen(0, r); });
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -220,4 +231,54 @@ test('roles are isolated', async () => {
   assert.equal((await api('POST', '/api/orders', { token: driver, body: { items: [] } })).status, 403);
   assert.equal((await api('GET', '/api/orders')).status, 401);
   assert.equal((await api('GET', '/api/admin/overview', { token: pharmacy })).status, 403);
+});
+
+const JPEG = 'data:image/jpeg;base64,' + Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9]).toString('base64');
+
+test('barcode lookup finds a product across companies', async () => {
+  const pharmacy = await login('pharmacy@maa.test');
+  const { products } = (await api('GET', '/api/products?q=Actifed', { token: pharmacy })).body;
+  const code = products[0].barcode;
+  assert.match(code, /^2\d{12}$/);
+  const found = (await api('GET', `/api/products?barcode=${code}`, { token: pharmacy })).body.products;
+  assert.deepEqual(found.map((p) => p.name), ['Actifed Rhume']);
+  assert.equal(found[0].image_url, 'img/products/actifed-rhume.jpg');
+});
+
+test('companies upload a product photo; anyone can load it', async () => {
+  const supplier = await login('supplier@maa.test');
+  const p = (await api('GET', '/api/supplier/products', { token: supplier })).body.products.find((x) => x.sku === 'NP-TAB-160');
+  assert.equal((await api('PUT', `/api/supplier/products/${p.id}/image`, { token: supplier, body: { data_url: 'data:text/html;base64,PGI+' } })).status, 400);
+  const up = await api('PUT', `/api/supplier/products/${p.id}/image`, { token: supplier, body: { data_url: JPEG } });
+  assert.match(up.body.product.image_url, new RegExp(`^api/product-images/${p.id}\\?v=`));
+  const img = await fetch(`${base}/api/product-images/${p.id}`);
+  assert.equal(img.headers.get('content-type'), 'image/jpeg');
+  assert.equal((await img.arrayBuffer()).byteLength, 9);
+  const supplier2 = await login('supplier2@maa.test');
+  assert.equal((await api('PUT', `/api/supplier/products/${p.id}/image`, { token: supplier2, body: { data_url: JPEG } })).status, 404, 'not their product');
+  await api('DELETE', `/api/supplier/products/${p.id}/image`, { token: supplier });
+  assert.equal((await fetch(`${base}/api/product-images/${p.id}`)).status, 404);
+});
+
+test('order by photo suggests only real catalogue products', async () => {
+  const pharmacy = await login('pharmacy@maa.test');
+  const { suppliers } = (await api('GET', '/api/suppliers', { token: pharmacy })).body;
+  const sahara = suppliers.find((x) => x.name === 'شركة الصحراء لتوزيع الأدوية');
+  const r = await api('POST', `/api/suppliers/${sahara.id}/recognize`, { token: pharmacy, body: { image: JPEG } });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual(r.body.matches.map((m) => [m.product.name, m.quantity]), [['Actifed Rhume', 12]]);
+  assert.deepEqual(r.body.not_found, ['Fake', 'Tabuvan 160 mg']);
+  assert.equal((await api('POST', `/api/suppliers/${sahara.id}/recognize`, { token: pharmacy, body: { image: 'nope' } })).status, 400);
+  const driver = await login('driver@maa.test');
+  assert.equal((await api('POST', `/api/suppliers/${sahara.id}/recognize`, { token: driver, body: { image: JPEG } })).status, 403);
+});
+
+test('import accepts barcodes and refuses bad ones', async () => {
+  const supplier2 = await login('supplier2@maa.test');
+  const r = await api('POST', '/api/supplier/products/import', { token: supplier2, body: { dry_run: true, rows: [
+    { sku: 'ML-ZYR-10', name: 'Zyrtec', price: '6', barcode: '٦٢٢١٠٠٠٠٠٠٠٠١' },
+    { sku: 'ML-CON-5', name: 'Concor', price: '8.5', barcode: '12' },
+  ] } });
+  assert.equal(r.body.update[0].changes.barcode, '6221000000001');
+  assert.equal(r.body.errors[0].code, 'bad_barcode');
 });

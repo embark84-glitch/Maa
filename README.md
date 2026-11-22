@@ -19,6 +19,9 @@ npm run seed     # demo accounts, two companies with different payment terms, st
 npm start        # http://localhost:3000
 ```
 
+The cold-and-flu products and their pack photos come from a real Libyan pharmacy shelf; prices and barcodes are
+illustrative (barcodes use the GS1 `2…` internal-use range, so they never match a real pack).
+
 Demo logins (password `password123`): `pharmacy@maa.test`, `supplier@maa.test` (Al Wadi: full, 30 % deposit
 or 30-day credit up to 5,000 LYD, minimum order 100 LYD), `supplier2@maa.test` (Sahara: full or 15-day credit up
 to 2,000 LYD), `driver@maa.test`, `admin@maa.test`.
@@ -58,6 +61,25 @@ placed ──accept──▶ accepted ──(upfront paid)──▶ ready_for_pi
   ├─reject─▶ rejected   └─cancel─▶ cancelled (stock returned)
 ```
 
+## Adding products faster: photo and barcode
+
+On a company's product page the pharmacist can also:
+
+- **Order by photo**: photograph packs on the shelf, a handwritten shortage list or an old invoice. Claude reads
+  the photo and matches what it sees to *this company's* catalogue only (`shared/recognize.js`). Each suggestion
+  shows the pack photo, a quantity (taken from the photo when one is written, otherwise the minimum order) and a
+  "check this" note when it was unsure. Medicines the company does not sell are listed separately. Nothing is
+  added until the pharmacist taps *Add selected*. The Node server calls Claude through the Anthropic SDK
+  (`src/recognize-claude.js`: model `claude-opus-5-5`, structured JSON output, server-side refusal fallback).
+  Set `ANTHROPIC_API_KEY` (or log in with `ant auth login`); `MAA_PHOTO_ORDERS=off` turns it off.
+- **Scan barcodes**: a handheld USB/Bluetooth scanner works in the search box (it types the code and Enter).
+  *Scan barcode* opens the phone camera (the browser's `BarcodeDetector` where available, otherwise the
+  open-source ZXing reader), or reads a photo of the barcode where live camera access is not allowed.
+  A code that only another company sells says which company has it.
+
+Products carry a barcode and a pack photo. Companies add the photo from the product form (it is shrunk in the
+browser and stored in the database), or give an `https://` image link in Excel or the API.
+
 ## Updating products: Excel or API
 
 Products are matched by the company's **product code (SKU)**: known codes are updated, new codes are added.
@@ -67,7 +89,7 @@ row number and reason for every error. Rows with errors block saving unless the 
 
 **Excel / CSV**: first row = column names, Arabic or English. Required: `رمز المنتج` (sku), `الاسم التجاري` (name),
 `السعر` (price). Optional: `الاسم العلمي`, `الفئة`, `الشكل الدوائي`, `التركيز`, `حجم العبوة`, `الكمية المتوفرة`,
-`الحد الأدنى للطلب`, `تبريد` (نعم/لا). Arabic digits and `4,50`-style decimals are understood. The upload page
+`الحد الأدنى للطلب`, `تبريد` (نعم/لا), `الباركود`, `رابط الصورة` (https). Arabic digits and `4,50`-style decimals are understood. The upload page
 offers a template and an export of the current list.
 
 **API**: create a key under *Payment & API* (shown once; only its hash is stored), then:
@@ -86,7 +108,9 @@ page. Each sync is logged in the company's update history. Parsing and matching 
 `npm run build:demo` writes `standalone/maa-demo.html`: the whole app in one page that needs no server.
 It runs **the same server code** (`src/routes`, `src/store.js`, …) inside the browser on SQLite compiled to
 JavaScript ([sql.js](https://sql.js.org)), behind `window.fetch`, so the demo behaves exactly like the real
-server. Data is saved in that browser only. A guide panel walks through one order step by step and lets you
+server. Data is saved in that browser only. Order by photo uses the viewer's own Claude through the page's
+`sample` capability (the viewer is asked once). Live camera scanning is not available inside the hosted page,
+so it falls back to photographing the barcode. A guide panel walks through one order step by step and lets you
 switch roles with one tap. Only `src/auth.js` is swapped (for `standalone/auth-browser.js`), because Node's
 crypto module is not available in browsers; never use that file on a server.
 

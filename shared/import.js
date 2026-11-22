@@ -29,10 +29,12 @@
     min_order_qty: ['min', 'min qty', 'min order', 'minimum order', 'moq', 'الحد الأدنى', 'الحد الأدنى للطلب', 'أقل كمية'],
     cold_chain: ['cold chain', 'cold', 'refrigerated', 'تبريد', 'سلسلة تبريد', 'مبرد'],
     active: ['active', 'listed', 'for sale', 'معروض', 'نشط', 'متاح للبيع'],
+    barcode: ['barcode', 'gtin', 'ean', 'upc', 'الباركود', 'باركود', 'رمز الباركود'],
+    image_url: ['image', 'image url', 'photo', 'picture', 'الصورة', 'رابط الصورة', 'صورة'],
   };
   const REQUIRED = ['sku', 'name', 'price'];
-  const TEMPLATE_HEADERS = ['رمز المنتج', 'الاسم التجاري', 'الاسم العلمي', 'الفئة', 'الشكل الدوائي', 'التركيز', 'حجم العبوة', 'السعر', 'الكمية المتوفرة', 'الحد الأدنى للطلب', 'تبريد'];
-  const TEMPLATE_EXAMPLE = ['NP-PAN-500', 'Panadol', 'Paracetamol', 'مسكنات', 'أقراص', '500 mg', 'علبة 24', '4.50', '1200', '10', 'لا'];
+  const TEMPLATE_HEADERS = ['رمز المنتج', 'الاسم التجاري', 'الاسم العلمي', 'الفئة', 'الشكل الدوائي', 'التركيز', 'حجم العبوة', 'السعر', 'الكمية المتوفرة', 'الحد الأدنى للطلب', 'تبريد', 'الباركود', 'رابط الصورة'];
+  const TEMPLATE_EXAMPLE = ['NP-PAN-500', 'Panadol', 'Paracetamol', 'مسكنات', 'أقراص', '500 mg', 'علبة 24', '4.50', '1200', '10', 'لا', '6221234567890', 'https://example.com/panadol.jpg'];
 
   const norm = (s) => String(s).trim().toLowerCase().replace(/[\s_\-./()]+/g, ' ').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').trim();
   const LOOKUP = {};
@@ -97,6 +99,7 @@
 
     const products = [];
     const seen = new Map();
+    const seenBarcodes = new Map();
     rawRows.forEach((raw, i) => {
       const row = i + 2;
       const r = {};
@@ -132,10 +135,24 @@
         if (b === null) return fail('bad_yes_no', 'cold_chain', 'Cold chain must be yes or no');
         p.cold_chain = b;
       }
+      if ('barcode' in r && r.barcode !== '' && r.barcode != null) {
+        const b = toLatinDigits(r.barcode).replace(/[\s-]/g, '');
+        if (!/^\d{8,14}$/.test(b)) return fail('bad_barcode', 'barcode', 'Barcode must be 8 to 14 digits');
+        p.barcode = b;
+      }
+      if ('image_url' in r && r.image_url !== '' && r.image_url != null) {
+        const u = String(r.image_url).trim();
+        if (!/^https:\/\/\S+$/i.test(u) || u.length > 500) return fail('bad_image_url', 'image_url', 'Image link must start with https://');
+        p.image_url = u;
+      }
       if ('active' in r) {
         const b = parseBool(r.active, true);
         if (b === null) return fail('bad_yes_no', 'active', 'Listed must be yes or no');
         p.active = b;
+      }
+      if (p.barcode) {
+        if (seenBarcodes.has(p.barcode)) return fail('duplicate_barcode', 'barcode', `Barcode ${p.barcode} also appears on row ${seenBarcodes.get(p.barcode)}`);
+        seenBarcodes.set(p.barcode, row);
       }
       p.row = row;
       products.push(p);
@@ -143,7 +160,7 @@
     return { products, errors, unknownColumns: [...unknown] };
   }
 
-  const FIELDS = ['name', 'generic_name', 'category', 'form', 'strength', 'pack_size', 'price', 'stock', 'min_order_qty', 'cold_chain', 'active'];
+  const FIELDS = ['name', 'generic_name', 'category', 'form', 'strength', 'pack_size', 'price', 'stock', 'min_order_qty', 'cold_chain', 'active', 'barcode', 'image_url'];
   const same = (a, b) => (typeof a === 'boolean' || typeof b === 'boolean' ? !!a === !!b : (a ?? null) === (b ?? null));
 
   /**
@@ -176,5 +193,5 @@
     return plan;
   }
 
-  return { COLUMNS, REQUIRED, TEMPLATE_HEADERS, TEMPLATE_EXAMPLE, MAX_ROWS, normalizeProducts, planSync, parseNumber };
+  return { COLUMNS, REQUIRED, TEMPLATE_HEADERS, TEMPLATE_EXAMPLE, MAX_ROWS, normalizeProducts, planSync, parseNumber, toLatinDigits };
 });
