@@ -5,36 +5,36 @@
  * in localStorage, and intercepts window.fetch so public/app.js runs unchanged.
  */
 (function () {
-  const KEY = 'maa.demo.db';
+  const KEY = 'maa.demo.db.v2'; // bump when the demo data changes shape or language
   const CONFIG = { currency: 'LYD', deliveryFee: 1000 };
   const ACTIVE = ['placed', 'accepted', 'ready_for_pickup', 'assigned', 'picked_up'];
 
   function fresh() {
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
     const orgs = [
-      { id: 1, type: 'pharmacy', name: 'Al Shifa Pharmacy', license_no: 'PH-10293', address: 'Omar Al-Mukhtar Street', city: 'Tripoli', phone: '+218 91 000 0001', verified: true, created_at: now },
-      { id: 2, type: 'supplier', name: 'Al Wadi Medical Supplies', license_no: 'SUP-5521', address: 'Gergarish Road, Warehouse 7', city: 'Tripoli', phone: '+218 92 000 0001', verified: true, created_at: now },
-      { id: 3, type: 'supplier', name: 'Sahara Pharma Distribution', license_no: 'SUP-7780', address: 'Free Zone, Block 12', city: 'Misrata', phone: '+218 92 000 0002', verified: true, created_at: now },
+      { id: 1, type: 'pharmacy', name: 'صيدلية الشفاء', license_no: 'PH-10293', address: 'شارع عمر المختار', city: 'طرابلس', phone: '+218 91 000 0001', verified: true, created_at: now },
+      { id: 2, type: 'supplier', name: 'شركة الوادي للمستلزمات الطبية', license_no: 'SUP-5521', address: 'طريق قرقارش، مخزن 7', city: 'طرابلس', phone: '+218 92 000 0001', verified: true, created_at: now },
+      { id: 3, type: 'supplier', name: 'شركة الصحراء لتوزيع الأدوية', license_no: 'SUP-7780', address: 'المنطقة الحرة، مربع 12', city: 'مصراتة', phone: '+218 92 000 0002', verified: true, created_at: now },
     ];
     const u = (id, name, email, role, org_id, phone, vehicle = null) => ({ id, name, email, role, org_id, phone, vehicle, approved: true, password: 'password123', created_at: now });
     const users = [
-      u(1, 'Platform Admin', 'admin@maa.test', 'admin', null, '+218 21 000 0000'),
-      u(2, 'Sara (Pharmacist)', 'pharmacy@maa.test', 'pharmacy', 1, '+218 91 000 0001'),
-      u(3, 'Omar (Al Wadi)', 'supplier@maa.test', 'supplier', 2, '+218 92 000 0001'),
-      u(4, 'Lina (Sahara Pharma)', 'supplier2@maa.test', 'supplier', 3, '+218 92 000 0002'),
-      u(5, 'Youssef (Driver)', 'driver@maa.test', 'driver', null, '+218 94 000 0001', 'Motorbike'),
+      u(1, 'مدير المنصة', 'admin@maa.test', 'admin', null, '+218 21 000 0000'),
+      u(2, 'سارة (صيدلانية)', 'pharmacy@maa.test', 'pharmacy', 1, '+218 91 000 0001'),
+      u(3, 'عمر (الوادي)', 'supplier@maa.test', 'supplier', 2, '+218 92 000 0001'),
+      u(4, 'لينا (الصحراء)', 'supplier2@maa.test', 'supplier', 3, '+218 92 000 0002'),
+      u(5, 'يوسف (سائق)', 'driver@maa.test', 'driver', null, '+218 94 000 0001', 'دراجة نارية'),
     ];
     const rows = [
-      [2, 'Panadol', 'Paracetamol', 'Pain relief', 'Tablet', '500 mg', 'Box of 24', 'NP-PAN-500', 450, 1200, 10, false],
-      [2, 'Brufen', 'Ibuprofen', 'Pain relief', 'Tablet', '400 mg', 'Box of 30', 'NP-BRU-400', 675, 800, 5, false],
-      [2, 'Augmentin', 'Amoxicillin + Clavulanate', 'Antibiotics', 'Tablet', '1 g', 'Box of 14', 'NP-AUG-1G', 1800, 300, 2, false],
-      [2, 'Ventolin Inhaler', 'Salbutamol', 'Respiratory', 'Inhaler', '100 mcg', '200 doses', 'NP-VEN-100', 1250, 150, 1, false],
-      [2, 'Glucophage', 'Metformin', 'Diabetes', 'Tablet', '850 mg', 'Box of 30', 'NP-GLU-850', 525, 600, 5, false],
-      [3, 'Lantus SoloStar', 'Insulin glargine', 'Diabetes', 'Pen', '100 IU/ml', '5 pens', 'ML-LAN-100', 8500, 60, 1, true],
-      [3, 'Concor', 'Bisoprolol', 'Cardio', 'Tablet', '5 mg', 'Box of 30', 'ML-CON-5', 850, 400, 3, false],
-      [3, 'Nexium', 'Esomeprazole', 'Gastro', 'Capsule', '40 mg', 'Box of 14', 'ML-NEX-40', 1500, 250, 2, false],
-      [3, 'Zyrtec', 'Cetirizine', 'Allergy', 'Tablet', '10 mg', 'Box of 20', 'ML-ZYR-10', 600, 500, 5, false],
-      [3, 'Panadol', 'Paracetamol', 'Pain relief', 'Tablet', '500 mg', 'Box of 24', 'ML-PAN-500', 425, 900, 10, false],
+      [2, 'Panadol', 'Paracetamol', 'مسكنات', 'أقراص', '500 mg', 'علبة 24', 'NP-PAN-500', 450, 1200, 10, false],
+      [2, 'Brufen', 'Ibuprofen', 'مسكنات', 'أقراص', '400 mg', 'علبة 30', 'NP-BRU-400', 675, 800, 5, false],
+      [2, 'Augmentin', 'Amoxicillin + Clavulanate', 'مضادات حيوية', 'أقراص', '1 g', 'علبة 14', 'NP-AUG-1G', 1800, 300, 2, false],
+      [2, 'Ventolin Inhaler', 'Salbutamol', 'الجهاز التنفسي', 'بخاخ', '100 mcg', '200 جرعة', 'NP-VEN-100', 1250, 150, 1, false],
+      [2, 'Glucophage', 'Metformin', 'السكري', 'أقراص', '850 mg', 'علبة 30', 'NP-GLU-850', 525, 600, 5, false],
+      [3, 'Lantus SoloStar', 'Insulin glargine', 'السكري', 'قلم', '100 IU/ml', '5 أقلام', 'ML-LAN-100', 8500, 60, 1, true],
+      [3, 'Concor', 'Bisoprolol', 'القلب والضغط', 'أقراص', '5 mg', 'علبة 30', 'ML-CON-5', 850, 400, 3, false],
+      [3, 'Nexium', 'Esomeprazole', 'الجهاز الهضمي', 'كبسولات', '40 mg', 'علبة 14', 'ML-NEX-40', 1500, 250, 2, false],
+      [3, 'Zyrtec', 'Cetirizine', 'الحساسية', 'أقراص', '10 mg', 'علبة 20', 'ML-ZYR-10', 600, 500, 5, false],
+      [3, 'Panadol', 'Paracetamol', 'مسكنات', 'أقراص', '500 mg', 'علبة 24', 'ML-PAN-500', 425, 900, 10, false],
     ];
     const products = rows.map((r, i) => ({
       id: i + 1, supplier_id: r[0], name: r[1], generic_name: r[2], category: r[3], form: r[4], strength: r[5],

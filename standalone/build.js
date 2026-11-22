@@ -14,15 +14,16 @@ const css = read('public/styles.css') + `
 .demo-bar button { font-size: .8rem; padding: .2rem .6rem; }`;
 
 const app = read('public/app.js')
-  .replace('Run <code>npm run seed</code> first. Password: <code>password123</code>', 'Password: <code>password123</code>');
+  ;
 
 let html = read('public/index.html')
   .replace('<title>Maa · Pharmacy Supply</title>', '<title>Maa Pharmacy Supply</title>')
   .replace('<link rel="stylesheet" href="styles.css">', () => `<style>\n${css}\n</style>`)
   .replace('<body>', () => `<body>
-  <div class="demo-bar">Demo version: runs entirely in your browser, data stays on this device.
-    <button type="button" onclick="maaResetDemo()">Reset demo data</button></div>`)
-  .replace('<script src="app.js"></script>', () => `<script>\n${safe(read('standalone/mock-api.js'))}\n</script>\n  <script>\n${safe(app)}\n</script>`);
+  <div class="demo-bar"><span data-t="Demo version: runs entirely in your browser, data stays on this device."></span>
+    <button type="button" onclick="maaResetDemo()" data-t="Reset demo data"></button></div>`)
+  .replace('<script src="i18n.js"></script>', () => '')
+  .replace('<script src="app.js"></script>', () => `<script>\n${safe(read('standalone/mock-api.js'))}\n</script>\n  <script>\n${safe(read('public/i18n.js'))}\n</script>\n  <script>\n${safe(app)}\n</script>`);
 
 const out = path.join(__dirname, 'maa-demo.html');
 fs.writeFileSync(out, html);

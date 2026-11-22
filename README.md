@@ -10,6 +10,13 @@ gets the goods to the pharmacy door with **drivers working in the same app**.
 | Driver | Sees packed orders waiting for pickup, takes a job, collects it, confirms delivery with the pharmacy's code |
 | Admin | Verifies pharmacy/supplier licenses and approves drivers before they can trade |
 
+## Language
+
+The interface is in **Arabic (right-to-left) by default**, with an English toggle in the top bar.
+All interface text lives in `public/i18n.js`: strings are written in English in `public/app.js`
+and looked up there, and server error messages are translated on the client too. To add or fix a
+translation, edit the `AR` table; any missing string falls back to English.
+
 ## Quick start
 
 ```bash
