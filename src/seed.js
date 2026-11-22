@@ -1,7 +1,6 @@
 'use strict';
 /** Fill the database with demo accounts and a starter catalog. Safe to re-run. */
-const path = require('node:path');
-const { openDb, tx } = require('./db');
+const { tx } = require('./store');
 const { hashPassword } = require('./auth');
 
 const DEMO_PASSWORD = 'password123';
@@ -25,6 +24,11 @@ function seed(db) {
 
     const s1 = org('supplier', 'شركة الوادي للمستلزمات الطبية', 'SUP-5521', 'طريق قرقارش، مخزن 7', 'طرابلس', '+218 92 000 0001');
     const s2 = org('supplier', 'شركة الصحراء لتوزيع الأدوية', 'SUP-7780', 'المنطقة الحرة، مربع 12', 'مصراتة', '+218 92 000 0002');
+    // Different terms of sale per company, so each payment option can be tried.
+    const policy = db.prepare(`UPDATE organizations SET allow_full = ?, allow_partial = ?, deposit_percent = ?, allow_credit = ?,
+      credit_days = ?, credit_limit = ?, min_order_value = ?, bank_details = ?, products_updated_at = datetime('now') WHERE id = ?`);
+    policy.run(1, 1, 30, 1, 30, 500000, 10000, 'مصرف الجمهورية - فرع قرقارش\nحساب رقم: 000-000-0000 (تجريبي)', s1);
+    policy.run(1, 0, 30, 1, 15, 200000, 5000, 'مصرف الوحدة - فرع مصراتة\nحساب رقم: 111-111-1111 (تجريبي)', s2);
     user('عمر (الوادي)', 'supplier@maa.test', 'supplier', s1, '+218 92 000 0001');
     user('لينا (الصحراء)', 'supplier2@maa.test', 'supplier', s2, '+218 92 000 0002');
 
@@ -51,6 +55,9 @@ function seed(db) {
 }
 
 if (require.main === module) {
+  // Command line: npm run seed (Node only; the browser demo calls seed() directly).
+  const path = require('node:path');
+  const { openDb } = require('./db');
   const db = openDb(process.env.DB_FILE || path.join(__dirname, '..', 'data', 'maa.db'));
   console.log(seed(db) ? `Seeded demo data. All demo accounts use password "${DEMO_PASSWORD}".` : 'Demo data already present.');
 }

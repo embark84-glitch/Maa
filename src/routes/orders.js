@@ -1,8 +1,10 @@
 'use strict';
-const { HttpError, requireRole } = require('../app');
+const { HttpError, requireRole } = require('../http');
 const { deliveryCode } = require('../auth');
-const { tx } = require('../db');
+const { tx } = require('../store');
 const v = require('../validate');
+const { getPolicy, creditOutstanding } = require('../policy');
+const { TERMS, paymentOptions, collectOnDelivery } = require('../../shared/payment');
 
 /**
  * Order lifecycle
@@ -14,7 +16,11 @@ const v = require('../validate');
  *                                                          delivered ◀──code── picked_up
  *
  * Stock is reserved when the order is placed and returned on reject/cancel.
+ * An order can only be marked ready once the company has recorded the upfront
+ * payment its terms require (full: everything, partial: the deposit, credit: nothing).
  */
+const PAYMENT_METHODS = ['bank_transfer', 'cash', 'card', 'cheque', 'other'];
+
 const STATUS = {
   PLACED: 'placed', ACCEPTED: 'accepted', REJECTED: 'rejected', CANCELLED: 'cancelled',
   READY: 'ready_for_pickup', ASSIGNED: 'assigned', PICKED_UP: 'picked_up', DELIVERED: 'delivered',
@@ -42,7 +48,8 @@ function restock(db, orderId) {
 function loadOrder(db, id, user) {
   const o = db.prepare(`
     SELECT o.*, ph.name AS pharmacy_name, ph.phone AS pharmacy_phone, ph.city AS pharmacy_city,
-           su.name AS supplier_name, su.address AS supplier_address, su.phone AS supplier_phone,
+           su.name AS supplier_name, su.address AS supplier_address, su.phone AS supplier_phone, su.bank_details AS supplier_bank_details,
+           su.deposit_percent AS supplier_deposit_percent,
            d.name AS driver_name, d.phone AS driver_phone, d.vehicle AS driver_vehicle
       FROM orders o
       JOIN organizations ph ON ph.id = o.pharmacy_id
@@ -59,6 +66,11 @@ function loadOrder(db, id, user) {
   // Only the receiving pharmacy ever sees the handover code.
   if (!(user.role === 'pharmacy' || user.role === 'admin')) delete o.delivery_code;
   o.items = db.prepare('SELECT product_id, name, unit_price, qty, line_total FROM order_items WHERE order_id = ?').all(id);
+  o.payments = user.role === 'driver' ? [] : db.prepare(`
+    SELECT p.amount, p.method, p.reference, p.created_at, u.name AS recorded_by
+      FROM order_payments p LEFT JOIN users u ON u.id = p.recorded_by WHERE p.order_id = ? ORDER BY p.id`).all(id);
+  o.balance = o.total - o.paid_amount;
+  o.collect_on_delivery = collectOnDelivery(o);
   o.events = db.prepare(`
     SELECT e.status, e.note, e.created_at, u.name AS actor_name, u.role AS actor_role
       FROM order_events e LEFT JOIN users u ON u.id = e.actor_id WHERE e.order_id = ? ORDER BY e.id`).all(id);
@@ -78,7 +90,7 @@ function listOrders(db, user, statusFilter) {
     if (list.length) { where += ` AND o.status IN (${list.map(() => '?').join(',')})`; args.push(...list); }
   }
   return db.prepare(`
-    SELECT o.id, o.status, o.total, o.subtotal, o.delivery_fee, o.payment_method, o.created_at, o.updated_at,
+    SELECT o.id, o.status, o.total, o.subtotal, o.delivery_fee, o.payment_terms, o.upfront_required, o.paid_amount, o.due_date, o.created_at, o.updated_at,
            o.delivery_address, ph.name AS pharmacy_name, su.name AS supplier_name, d.name AS driver_name,
            (SELECT COUNT(*) FROM order_items i WHERE i.order_id = o.id) AS item_count
       FROM orders o
@@ -95,11 +107,17 @@ module.exports = (app, { db, deliveryFee }) => {
    */
   app.post('/api/orders', requireRole('pharmacy'), (req, res) => {
     const b = req.body || {};
+    const supplierId = v.int(b.supplier_id, 'supplier_id', { min: 1 });
     if (!Array.isArray(b.items) || b.items.length === 0) throw new HttpError(400, 'items must be a non-empty list');
-    if (b.items.length > 200) throw new HttpError(400, 'Too many items in one checkout');
-    const payment = b.payment_method ?? 'cash_on_delivery';
-    if (!['cash_on_delivery', 'credit'].includes(payment)) throw new HttpError(400, 'payment_method must be cash_on_delivery or credit');
+    if (b.items.length > 500) throw new HttpError(400, 'Too many items in one order');
+    const terms = b.payment_terms;
+    if (!TERMS.includes(terms)) throw new HttpError(400, 'payment_terms must be full, partial or credit');
     const notes = v.str(b.notes, 'notes', { required: false, max: 500 });
+    const reference = v.str(b.payment_reference, 'payment_reference', { required: false, max: 100 });
+
+    const supplier = db.prepare("SELECT * FROM organizations WHERE id = ? AND type = 'supplier' AND verified = 1").get(supplierId);
+    if (!supplier) throw new HttpError(400, 'This company is not available');
+    const policy = getPolicy(db, supplierId);
 
     // Merge duplicate lines.
     const qtyByProduct = new Map();
@@ -108,45 +126,45 @@ module.exports = (app, { db, deliveryFee }) => {
       const qty = v.int(it?.qty, 'qty', { min: 1, max: 100_000 });
       qtyByProduct.set(pid, (qtyByProduct.get(pid) || 0) + qty);
     }
-
     const pharmacy = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.user.org_id);
 
-    const orderIds = tx(db, () => {
-      const bySupplier = new Map();
+    const orderId = tx(db, () => {
+      const lines = [];
       for (const [pid, qty] of qtyByProduct) {
-        const p = db.prepare(`
-          SELECT p.* FROM products p JOIN organizations o ON o.id = p.supplier_id
-           WHERE p.id = ? AND p.active = 1 AND o.verified = 1`).get(pid);
+        const p = db.prepare('SELECT * FROM products WHERE id = ? AND supplier_id = ? AND active = 1').get(pid, supplierId);
         if (!p) throw new HttpError(400, `Product ${pid} is not available`);
         if (qty < p.min_order_qty) throw new HttpError(400, `Minimum order for ${p.name} is ${p.min_order_qty}`);
         const upd = db.prepare('UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?').run(qty, pid, qty);
         if (upd.changes !== 1) throw new HttpError(409, `Not enough stock for ${p.name} (available: ${p.stock})`);
-        if (!bySupplier.has(p.supplier_id)) bySupplier.set(p.supplier_id, []);
-        bySupplier.get(p.supplier_id).push({ p, qty });
+        lines.push({ p, qty });
       }
+      const subtotal = lines.reduce((s, l) => s + l.p.price * l.qty, 0);
+      if (subtotal < policy.min_order_value) throw new HttpError(400, `Minimum order value for this company is ${policy.min_order_value}`, { code: 'min_order_value', value: policy.min_order_value });
+      const total = subtotal + deliveryFee;
 
-      const ids = [];
-      for (const [supplierId, lines] of bySupplier) {
-        const subtotal = lines.reduce((s, l) => s + l.p.price * l.qty, 0);
-        const r = db.prepare(`
-          INSERT INTO orders (pharmacy_id, supplier_id, placed_by, status, subtotal, delivery_fee, total,
-                              payment_method, notes, delivery_address, delivery_code)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-          pharmacy.id, supplierId, req.user.id, STATUS.PLACED, subtotal, deliveryFee, subtotal + deliveryFee,
-          payment, notes, [pharmacy.address, pharmacy.city].filter(Boolean).join(', '), deliveryCode());
-        const orderId = Number(r.lastInsertRowid);
-        for (const { p, qty } of lines) {
-          const label = [p.name, p.strength, p.form, p.pack_size].filter(Boolean).join(' · ');
-          db.prepare('INSERT INTO order_items (order_id, product_id, name, unit_price, qty, line_total) VALUES (?, ?, ?, ?, ?, ?)')
-            .run(orderId, p.id, label, p.price, qty, p.price * qty);
-        }
-        addEvent(db, orderId, STATUS.PLACED, req.user.id);
-        ids.push(orderId);
+      // Payment terms must be offered by the company, and credit must fit within the limit.
+      const option = paymentOptions(policy, total, creditOutstanding(db, pharmacy.id, supplierId)).find((x) => x.terms === terms);
+      if (!option) throw new HttpError(400, 'This company does not offer that payment option');
+      if (!option.available) throw new HttpError(409, 'This order is above your remaining credit with this company', { code: 'credit_limit', remaining: option.remaining });
+
+      const r = db.prepare(`
+        INSERT INTO orders (pharmacy_id, supplier_id, placed_by, status, subtotal, delivery_fee, total, payment_terms,
+                            upfront_required, payment_reference, credit_days, notes, delivery_address, delivery_code)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        pharmacy.id, supplierId, req.user.id, STATUS.PLACED, subtotal, deliveryFee, total, terms,
+        option.upfront, reference, terms === 'credit' ? policy.credit_days : null, notes,
+        [pharmacy.address, pharmacy.city].filter(Boolean).join(', '), deliveryCode());
+      const id = Number(r.lastInsertRowid);
+      for (const { p, qty } of lines) {
+        const label = [p.name, p.strength, p.form, p.pack_size].filter(Boolean).join(' · ');
+        db.prepare('INSERT INTO order_items (order_id, product_id, name, unit_price, qty, line_total) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(id, p.id, label, p.price, qty, p.price * qty);
       }
-      return ids;
+      addEvent(db, id, STATUS.PLACED, req.user.id);
+      return id;
     });
 
-    res.status(201).json({ orders: orderIds.map((id) => loadOrder(db, id, req.user)) });
+    res.status(201).json({ order: loadOrder(db, orderId, req.user) });
   });
 
   app.get('/api/orders', requireRole(), (req, res) => {
@@ -186,6 +204,9 @@ module.exports = (app, { db, deliveryFee }) => {
 
   app.post('/api/orders/:id/ready', requireRole('supplier'), (req, res) => {
     const o = ownOrder(req, 'supplier');
+    if (o.paid_amount < o.upfront_required) {
+      throw new HttpError(409, `Record the customer's payment first: ${o.paid_amount} of ${o.upfront_required} received`, { code: 'payment_required', paid: o.paid_amount, required: o.upfront_required });
+    }
     tx(db, () => setStatus(db, o.id, [STATUS.ACCEPTED], STATUS.READY, req.user.id, 'Packed and waiting for a driver'));
     respond(req, res, o.id);
   });
@@ -199,6 +220,38 @@ module.exports = (app, { db, deliveryFee }) => {
     const allowed = side === 'pharmacy' ? [STATUS.PLACED] : [STATUS.ACCEPTED, STATUS.READY];
     const reason = v.str(req.body?.reason, 'reason', { required: false, max: 300 });
     tx(db, () => { setStatus(db, o.id, allowed, STATUS.CANCELLED, req.user.id, reason); restock(db, o.id); });
+    respond(req, res, o.id);
+  });
+
+  // ---------- Payments ----------
+
+  /** The company records money it has actually received (transfer cleared, cash counted, ...). */
+  app.post('/api/orders/:id/payments', requireRole('supplier'), (req, res) => {
+    const o = ownOrder(req, 'supplier');
+    if ([STATUS.REJECTED, STATUS.CANCELLED].includes(o.status)) throw new HttpError(409, 'This order is closed');
+    const amount = v.money(req.body?.amount, 'amount');
+    if (amount <= 0) throw new HttpError(400, 'amount must be more than zero');
+    if (amount > o.total - o.paid_amount) throw new HttpError(400, `Payment is more than the amount still owed (${o.total - o.paid_amount})`, { code: 'overpayment', balance: o.total - o.paid_amount });
+    const method = req.body?.method;
+    if (!PAYMENT_METHODS.includes(method)) throw new HttpError(400, `method must be one of ${PAYMENT_METHODS.join(', ')}`);
+    const reference = v.str(req.body?.reference, 'reference', { required: false, max: 100 });
+    tx(db, () => {
+      db.prepare('INSERT INTO order_payments (order_id, amount, method, reference, recorded_by) VALUES (?, ?, ?, ?, ?)').run(o.id, amount, method, reference, req.user.id);
+      const r = db.prepare("UPDATE orders SET paid_amount = paid_amount + ?, updated_at = datetime('now') WHERE id = ? AND paid_amount + ? <= total").run(amount, o.id, amount);
+      if (r.changes !== 1) throw new HttpError(409, 'The order changed. Refresh and try again.');
+      addEvent(db, o.id, 'payment_received', req.user.id, String(amount));
+    });
+    respond(req, res, o.id);
+  });
+
+  /** The pharmacy adds the bank-transfer receipt number so the company can match the payment. */
+  app.post('/api/orders/:id/payment-reference', requireRole('pharmacy'), (req, res) => {
+    const o = ownOrder(req, 'pharmacy');
+    const reference = v.str(req.body?.reference, 'reference', { max: 100 });
+    tx(db, () => {
+      db.prepare("UPDATE orders SET payment_reference = ?, updated_at = datetime('now') WHERE id = ?").run(reference, o.id);
+      addEvent(db, o.id, 'payment_reference', req.user.id, reference);
+    });
     respond(req, res, o.id);
   });
 };

@@ -17,5 +17,9 @@
   "private": true,
   "dependencies": {
     "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "sql.js": "1.10.3",
+    "xlsx": "0.18.5"
   }
 }

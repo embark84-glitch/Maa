@@ -1,7 +1,7 @@
 'use strict';
-const { HttpError } = require('../app');
+const { HttpError } = require('../http');
 const { hashPassword, verifyPassword, signToken } = require('../auth');
-const { tx } = require('../db');
+const { tx } = require('../store');
 const v = require('../validate');
 
 module.exports = (app, { db, secret }) => {

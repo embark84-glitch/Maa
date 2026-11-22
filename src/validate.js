@@ -1,5 +1,5 @@
 'use strict';
-const { HttpError } = require('./app');
+const { HttpError } = require('./http');
 
 function str(v, field, { required = true, max = 200 } = {}) {
   if (v === undefined || v === null || v === '') {

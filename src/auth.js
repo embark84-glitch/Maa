@@ -46,4 +46,13 @@ function deliveryCode() {
   return String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
 }
 
-module.exports = { hashPassword, verifyPassword, signToken, verifyToken, deliveryCode };
+/** New API key for a supplier's system. Only its hash is stored; the key is shown once. */
+function generateApiKey() {
+  return `maa_${crypto.randomBytes(24).toString('base64url')}`;
+}
+
+function hashApiKey(key) {
+  return crypto.createHash('sha256').update(String(key)).digest('hex');
+}
+
+module.exports = { hashPassword, verifyPassword, signToken, verifyToken, deliveryCode, generateApiKey, hashApiKey };

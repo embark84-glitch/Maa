@@ -1,101 +1,116 @@
 # Maa: pharmacy supply marketplace with built-in delivery
 
-Maa lets **pharmacies** order medicines from **pharmaceutical companies and distributors**, and
-gets the goods to the pharmacy door with **drivers working in the same app**.
+Maa lets **pharmacies** order medicines from **pharmaceutical companies and distributors**, pay on
+each company's own terms, and receive the goods from **drivers working in the same app**.
+The interface is in **Arabic (right to left) by default**, with an English toggle. Prices are in Libyan dinars.
 
 | Role | What they do |
 |---|---|
-| Pharmacy | Searches one catalog across all suppliers, compares prices, checks out a mixed cart, tracks each shipment, and gives the driver a 6-digit code at handover |
-| Supplier company | Lists products (price, stock, minimum order, cold-chain flag), accepts or rejects orders, marks them packed |
-| Driver | Sees packed orders waiting for pickup, takes a job, collects it, confirms delivery with the pharmacy's code |
-| Admin | Verifies pharmacy/supplier licenses and approves drivers before they can trade |
-
-## Language
-
-The interface is in **Arabic (right-to-left) by default**, with an English toggle in the top bar.
-All interface text lives in `public/i18n.js`: strings are written in English in `public/app.js`
-and looked up there, and server error messages are translated on the client too. To add or fix a
-translation, edit the `AR` table; any missing string falls back to English.
+| Pharmacy (purchasing manager) | **New order → choose a company → its products → payment & confirm.** Tracks each order, adds transfer receipt numbers, gives the driver a 6-digit code at handover |
+| Supplier company | Uploads its product list from **Excel** or its own system via the **API**, sets its **payment terms**, accepts orders, records payments received, marks orders packed |
+| Driver | Takes packed orders, collects them, collects any cash due, confirms delivery with the pharmacy's code |
+| Admin | Verifies pharmacy/company licenses and approves drivers before they can trade |
 
 ## Quick start
 
 ```bash
 npm install
-npm run seed     # demo accounts + catalog
+npm run seed     # demo accounts, two companies with different payment terms, starter catalog
 npm start        # http://localhost:3000
 ```
 
-Demo logins (password `password123`): `pharmacy@maa.test`, `supplier@maa.test`,
-`supplier2@maa.test`, `driver@maa.test`, `admin@maa.test`. The sign-in page has one-click buttons for each.
+Demo logins (password `password123`): `pharmacy@maa.test`, `supplier@maa.test` (Al Wadi: full, 30 % deposit
+or 30-day credit up to 5,000 LYD, minimum order 100 LYD), `supplier2@maa.test` (Sahara: full or 15-day credit up
+to 2,000 LYD), `driver@maa.test`, `admin@maa.test`.
 
-Needs Node.js 22.5 or newer (it uses the built-in `node:sqlite`, so there are no native dependencies).
-
-### Single-file HTML demo
-
-`standalone/maa-demo.html` is the whole app in one HTML file that runs with no server: open it in any
-browser and use the demo buttons to switch between pharmacy, supplier, driver and admin. Data is kept in
-that browser only. It is rebuilt from `public/` with `npm run build:demo`, using an in-browser copy of the
-API (`standalone/mock-api.js`). Use it for demos, not real orders.
-
-### Configuration (environment variables)
+Needs Node.js 22.5 or newer (built-in `node:sqlite`, no native dependencies). The browser loads the Excel
+reader from jsDelivr, so uploading files needs an internet connection.
 
 | Variable | Default | |
 |---|---|---|
 | `PORT` | `3000` | |
-| `DB_FILE` | `data/maa.db` | SQLite file |
+| `DB_FILE` | `data/maa.db` | SQLite file. A file from an older version is refused with a message: delete it and seed again |
 | `AUTH_SECRET` | random per start | **Required** when `NODE_ENV=production` |
 | `CURRENCY` | `LYD` | ISO code used for display |
-| `DELIVERY_FEE` | `10` | Flat fee per shipment, in major units |
+| `DELIVERY_FEE` | `10` | Flat fee per order, in dinars |
 
-## How an order flows
+## Ordering and payment
+
+A pharmacy orders from **one company at a time**. The draft is saved on the device as quantities are entered,
+so leaving and coming back loses nothing. Quantities below the company's minimum, above its stock, or orders
+under its minimum order value are flagged before checkout and refused again by the server.
+
+Each company chooses which payment terms it offers (`Payment & API` page):
+
+| Terms | Before dispatch | Rest |
+|---|---|---|
+| **Full** | whole total | none |
+| **Deposit** | the company's % (e.g. 30 %) | collected by the driver on delivery |
+| **Credit** | nothing | due *N* days after delivery, within the company's credit limit per pharmacy |
+
+The company accepts the order (and with it the terms), then **records the money it actually receives**
+(bank transfer, cash, cheque…). It cannot mark the order packed until the upfront amount is recorded.
+Credit beyond the remaining limit is not offered at checkout and is refused by the server. The rules live
+in `shared/payment.js`, used by both the server and the browser so the numbers always match.
 
 ```
-placed ──▶ accepted ──▶ ready_for_pickup ──▶ assigned ──▶ picked_up ──▶ delivered
-  │  └▶ rejected   └──────────┴──▶ cancelled    ▲   │
-  └▶ cancelled (by pharmacy)                    └───┘ driver releases job
+placed ──accept──▶ accepted ──(upfront paid)──▶ ready_for_pickup ──▶ assigned ──▶ picked_up ──code──▶ delivered
+  ├─reject─▶ rejected   └─cancel─▶ cancelled (stock returned)
 ```
 
-* A cart with products from several companies is **split into one order per supplier**; each is a separate shipment.
-* Stock is **reserved at checkout** in a single transaction (all lines or none) and returned on reject or cancel.
-* Only one driver can claim a job. The **delivery code is visible only to the pharmacy**, so a driver
-  can only mark an order delivered after a real handover.
-* Every status change is recorded in a tracking timeline with who did it and when.
+## Updating products: Excel or API
+
+Products are matched by the company's **product code (SKU)**: known codes are updated, new codes are added.
+Nothing is saved until the company has seen the preview: new / changed / unchanged / hidden / errors, with the
+row number and reason for every error. Rows with errors block saving unless the company chooses to skip them.
+"Hide products not in this file" stops selling them without deleting anything (old orders keep their history).
+
+**Excel / CSV**: first row = column names, Arabic or English. Required: `رمز المنتج` (sku), `الاسم التجاري` (name),
+`السعر` (price). Optional: `الاسم العلمي`, `الفئة`, `الشكل الدوائي`, `التركيز`, `حجم العبوة`, `الكمية المتوفرة`,
+`الحد الأدنى للطلب`, `تبريد` (نعم/لا). Arabic digits and `4,50`-style decimals are understood. The upload page
+offers a template and an export of the current list.
+
+**API**: create a key under *Payment & API* (shown once; only its hash is stored), then:
+
+```bash
+curl -X POST https://your-host/api/v1/products/sync \
+  -H "X-Api-Key: maa_..." -H "Content-Type: application/json" \
+  -d '{"products":[{"sku":"NP-PAN-500","name":"Panadol","price":4.5,"stock":1200}], "dry_run": true}'
+```
+
+`dry_run: true` returns the same preview without saving; `hide_missing` and `skip_errors` work as in the upload
+page. Each sync is logged in the company's update history. Parsing and matching live in `shared/import.js`.
+
+## The one-file demo
+
+`npm run build:demo` writes `standalone/maa-demo.html`: the whole app in one page that needs no server.
+It runs **the same server code** (`src/routes`, `src/store.js`, …) inside the browser on SQLite compiled to
+JavaScript ([sql.js](https://sql.js.org)), behind `window.fetch`, so the demo behaves exactly like the real
+server. Data is saved in that browser only. A guide panel walks through one order step by step and lets you
+switch roles with one tap. Only `src/auth.js` is swapped (for `standalone/auth-browser.js`), because Node's
+crypto module is not available in browsers; never use that file on a server.
 
 ## Project layout
 
 ```
+shared/             rules used by server and browser: payment.js, import.js
 src/
-  index.js          server entry point
-  app.js            Express app, auth middleware, role guard
-  db.js             SQLite schema + transaction helper
-  auth.js           scrypt password hashing, signed tokens, delivery codes
-  routes/           auth, catalog, orders, deliveries, admin
-  seed.js           demo data
-public/             web client (plain HTML/CSS/JS, works on phones)
+  index.js          server entry point          app.js   Express wiring
+  http.js           errors, auth middleware     store.js schema + transactions (portable)
+  db.js             opens the SQLite file       policy.js company terms, open credit
+  auth.js           passwords, tokens, API keys seed.js  demo data
+  routes/           auth, catalog, supplier (products, import, settings, API), orders, deliveries, admin
+public/             web client: index.html, app.js, i18n.js (Arabic/English), styles.css
+standalone/         demo bundler, in-browser server, browser auth stand-in
 test/               end-to-end API tests: npm test
 ```
 
-## API summary
-
-All endpoints are JSON under `/api`, with `Authorization: Bearer <token>`.
-
-| Method & path | Who |
-|---|---|
-| `POST /auth/register`, `POST /auth/login`, `GET /me` | anyone |
-| `GET /products?q=&category=&supplier=`, `GET /suppliers` | pharmacy |
-| `POST /orders` `{items:[{product_id, qty}], payment_method, notes}` | pharmacy |
-| `GET /orders?status=a,b`, `GET /orders/:id` | all roles, scoped to what they may see |
-| `POST /orders/:id/accept \| reject \| ready` | supplier |
-| `POST /orders/:id/cancel` | pharmacy (before acceptance) or supplier (before pickup) |
-| `GET/POST /supplier/products`, `PATCH /supplier/products/:id` | supplier |
-| `GET /deliveries/available`, `POST /deliveries/:id/claim \| release \| pickup \| deliver` | driver |
-| `GET /admin/overview`, `POST /admin/organizations/:id/verify`, `POST /admin/drivers/:id/approve` | admin |
-
 ## Next steps toward production
 
-- Online payments (card / wallet) and supplier invoicing on credit terms
-- Live driver GPS on a map, push/SMS notifications on each status change
-- Batch/expiry tracking, and extra controls for prescription-only and controlled substances
-- Distance-based delivery pricing and driver payouts
-- Native mobile apps (the API is ready for them) and Arabic/RTL localisation
-- Move to Postgres when you outgrow a single server
+- Online payment (local card/wallet gateways) to confirm transfers automatically instead of by hand
+- Per-pharmacy credit limits and statements of account; reminders before credit is due
+- SMS / push notifications on each status change; live driver location
+- Batch and expiry tracking; extra controls for prescription-only and controlled medicines
+- Self-host the Excel reader at a patched version: `xlsx@0.18.5` from npm has a known advisory for crafted files
+  (it only ever reads the uploader's own file, in their own browser)
+- Move to Postgres when one server is no longer enough

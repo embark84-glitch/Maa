@@ -1,5 +1,5 @@
 'use strict';
-const { HttpError, requireRole } = require('../app');
+const { HttpError, requireRole } = require('../http');
 const v = require('../validate');
 
 /** Platform admin: verify pharmacy/supplier licenses and approve drivers. */

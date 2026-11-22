@@ -1,15 +1,16 @@
 'use strict';
-const { HttpError, requireRole } = require('../app');
-const { tx } = require('../db');
+const { HttpError, requireRole } = require('../http');
+const { tx } = require('../store');
 const v = require('../validate');
 const { STATUS, setStatus, loadOrder } = require('./orders');
+const { collectOnDelivery } = require('../../shared/payment');
 
 /** Driver side: pick up packed orders from suppliers and hand them to pharmacies. */
 module.exports = (app, { db }) => {
   /** Jobs waiting for a driver, with pickup and drop-off info. */
   app.get('/api/deliveries/available', requireRole('driver'), (_req, res) => {
     const jobs = db.prepare(`
-      SELECT o.id, o.total, o.delivery_fee, o.payment_method, o.updated_at,
+      SELECT o.id, o.total, o.delivery_fee, o.payment_terms, o.paid_amount, o.updated_at,
              su.name AS supplier_name, su.address AS pickup_address, su.city AS pickup_city,
              ph.name AS pharmacy_name, o.delivery_address,
              (SELECT COUNT(*) FROM order_items i WHERE i.order_id = o.id) AS item_count,
@@ -18,7 +19,7 @@ module.exports = (app, { db }) => {
         JOIN organizations su ON su.id = o.supplier_id
         JOIN organizations ph ON ph.id = o.pharmacy_id
        WHERE o.status = ? ORDER BY o.updated_at`).all(STATUS.READY);
-    res.json({ jobs: jobs.map((j) => ({ ...j, cold_chain: !!j.cold_chain })) });
+    res.json({ jobs: jobs.map((j) => ({ ...j, cold_chain: !!j.cold_chain, collect_on_delivery: collectOnDelivery(j) })) });
   });
 
   const id = (req) => v.int(req.params.id, 'id', { min: 1 });
@@ -55,7 +56,9 @@ module.exports = (app, { db }) => {
     if (o.status !== STATUS.PICKED_UP) throw new HttpError(409, 'Order has not been picked up yet');
     if (code !== o.delivery_code) throw new HttpError(400, 'Delivery code is incorrect');
     const note = v.str(req.body?.note, 'note', { required: false, max: 300 });
-    tx(db, () => setStatus(db, o.id, [STATUS.PICKED_UP], STATUS.DELIVERED, req.user.id, note || 'Handed over to pharmacy'));
+    // Credit terms start counting from the day the goods arrive.
+    const extra = o.payment_terms === 'credit' ? { due_date: new Date(Date.now() + o.credit_days * 86_400_000).toISOString().slice(0, 10) } : {};
+    tx(db, () => setStatus(db, o.id, [STATUS.PICKED_UP], STATUS.DELIVERED, req.user.id, note || 'Handed over to pharmacy', extra));
     respond(req, res, o.id);
   });
 };
