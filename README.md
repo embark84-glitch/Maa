@@ -114,6 +114,29 @@ so it falls back to photographing the barcode. A guide panel walks through one o
 switch roles with one tap. Only `src/auth.js` is swapped (for `standalone/auth-browser.js`), because Node's
 crypto module is not available in browsers; never use that file on a server.
 
+## The shared-link pilot
+
+`node standalone/build.js <demo.html> <pilot.html>` also writes the **pilot** page: the same app, but every
+person the artifact is shared with works on **one shared database** (the artifact's `db` capability), so a
+pharmacy's order reaches the company and the driver in real time. It starts empty except for the owner, who is
+the platform admin.
+
+- **Accounts follow Claude accounts.** Each participant opens the link while signed in to Claude, fills in the
+  sign-up form once (no password), and waits for the owner to verify their license in *Verification*.
+  Their screen opens by itself once approved, on every device they use.
+- **Who can use it:** only people the owner adds in the Share menu **as Editors** (database rules:
+  read and write at `admin`). Anyone else sees an access message.
+- **How saving works** (`standalone/shared-sync.js`): the SQLite file is gzipped and stored in chunks under
+  `maa/s-…`, with `maa/head` naming the current version. A change takes the `maa/lock` lease, catches up to
+  the newest version, runs the real server route, uploads the new version and releases the lease, so two
+  people saving at once both keep their changes. Every open page follows `maa/head` and refreshes when
+  someone else saves. Product photos are stored separately (`maa/img-<id>`).
+- **Trust model:** all logic runs in the participants' browsers. It protects against mistakes, not against
+  an Editor who deliberately edits the data with developer tools, and Editors can also publish new versions
+  of the page. Invite only partners you trust; for a wider launch, run the Node server instead.
+- Order by photo uses each participant's own Claude (asked once). Live camera scanning is not available
+  inside the hosted page: participants photograph the barcode or use a handheld scanner.
+
 ## Project layout
 
 ```

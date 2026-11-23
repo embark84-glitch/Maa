@@ -22,6 +22,8 @@ const state = {
   refreshTimer: null,
 };
 const saveDrafts = () => localSet('maa.drafts', JSON.stringify(state.drafts));
+/** The shared-link pilot: everyone on the artifact shares one database; accounts follow Claude accounts. */
+const SHARED = window.MAA_MODE === 'shared';
 
 // ---------------------------------------------------------------- formatting
 
@@ -52,7 +54,7 @@ function hydrateImages(root = document) {
     const url = img.dataset.src;
     img.removeAttribute('data-src');
     img.onerror = () => { img.outerHTML = thumb({ name: img.dataset.name }, img.className.replace('thumb', '').trim()); };
-    if (window.maaDemo && url.startsWith('api/')) {
+    if (window.maaInBrowser && url.startsWith('api/')) {
       fetch(`/${url}`).then((r) => (r.ok ? r.blob() : Promise.reject())).then((b) => { img.src = URL.createObjectURL(b); }).catch(() => img.onerror());
     } else {
       img.src = url;
@@ -172,6 +174,7 @@ const ACTIVE_NAV = { shop: '#new', checkout: '#new', order: null };
 
 async function render() {
   clearInterval(state.refreshTimer);
+  const seq = ++render.seq;
   const view = $('#view');
   I18N.apply();
   // Routes are '#name' or '#name-12' so they survive being shared as a link.
@@ -185,6 +188,7 @@ async function render() {
   renderGuide();
   if (!state.user) {
     $('#nav').innerHTML = ''; $('#who').innerHTML = langBtn; bindLang();
+    if (SHARED) return state.sharedProblem ? renderSharedProblem(view) : renderRegister(view);
     return route === 'register' ? renderRegister(view) : renderLogin(view);
   }
 
@@ -192,8 +196,8 @@ async function render() {
   const activeHref = ACTIVE_NAV[route] !== undefined ? ACTIVE_NAV[route] : `#${route}`;
   $('#nav').innerHTML = (NAV[u.role] || []).map(([href, label]) =>
     `<a href="${href}" class="${href === activeHref ? 'active' : ''}">${t(label)}</a>`).join('');
-  $('#who').innerHTML = `<span class="name muted">${esc(u.organization?.name || u.name)}</span>${langBtn}<button class="link" id="logout">${t('Log out')}</button>`;
-  $('#logout').onclick = logout;
+  $('#who').innerHTML = `<span class="name muted">${esc(u.organization?.name || u.name)}</span>${langBtn}${SHARED ? '' : `<button class="link" id="logout">${t('Log out')}</button>`}`;
+  if (!SHARED) $('#logout').onclick = logout;
   bindLang();
 
   if ((u.organization && !u.organization.verified) || !u.approved) return renderPending(view);
@@ -206,12 +210,22 @@ async function render() {
   };
   const fn = routes[route];
   if (!fn) { location.hash = HOME[u.role]; return; }
-  view.innerHTML = `<p class="muted">${t('Loading…')}</p>`;
-  try { await fn(view, param); } catch (e) { view.innerHTML = `<div class="card">${esc(e.message)}</div>`; }
-  hydrateImages(view);
+  // Each render builds a fresh page and only the newest one is shown, so a slow
+  // earlier render can never overwrite the page the person has since moved to.
+  const page = `${route}-${param ?? ''}`;
+  if (render.page !== page) view.innerHTML = `<p class="muted">${t('Loading…')}</p>`;
+  render.page = page;
+  const next = document.createElement('main');
+  next.id = 'view';
+  next.className = 'view';
+  try { await fn(next, param); } catch (e) { next.innerHTML = `<div class="card">${esc(e.message)}</div>`; }
+  if (seq !== render.seq) return;
+  $('#view').replaceWith(next);
+  hydrateImages(next);
   highlightStep();
 }
 
+render.seq = 0;
 window.addEventListener('hashchange', render);
 
 // ---------------------------------------------------------------- sign in
@@ -259,7 +273,8 @@ function renderLogin(view) {
 function renderRegister(view) {
   view.innerHTML = `
     <div class="auth card stack">
-      <h1>${t('Create an account')}</h1>
+      <h1>${t(SHARED ? 'Welcome to Maa' : 'Create an account')}</h1>
+      ${SHARED ? `<p class="callout small">${t('Create your account once. It is linked to the Claude account you are signed in with, so there is no password to remember.')}</p>` : ''}
       <form id="f" class="stack">
         <label>${t('I am a')}
           <select name="role" id="role">
@@ -271,7 +286,7 @@ function renderRegister(view) {
         <label>${t('Your name')}<input name="name" required></label>
         <label>${t('Email')}<input name="email" type="email" dir="ltr" required></label>
         <label>${t('Phone')}<input name="phone" type="tel" dir="ltr" placeholder="+218 9x xxx xxxx" required></label>
-        <label>${t('Password (min 8 characters)')}<input name="password" type="password" dir="ltr" minlength="8" required></label>
+        ${SHARED ? '' : `<label>${t('Password (min 8 characters)')}<input name="password" type="password" dir="ltr" minlength="8" required></label>`}
         <div id="org" class="stack">
           <label>${t('Business name')}<input name="org_name" required></label>
           <label>${t('License number')}<input name="license_no" required></label>
@@ -282,7 +297,7 @@ function renderRegister(view) {
         <p class="small muted">${t('Licenses are checked by Maa before you can buy or sell.')}</p>
         <button class="primary" type="submit">${t('Create an account')}</button>
       </form>
-      <p class="small"><a href="#login">${t('Back to sign in')}</a></p>
+      ${SHARED ? '' : `<p class="small"><a href="#login">${t('Back to sign in')}</a></p>`}
     </div>`;
   const f = $('#f', view);
   $('#role', view).onchange = () => {
@@ -294,7 +309,9 @@ function renderRegister(view) {
   f.onsubmit = action(async (ev) => {
     ev.preventDefault();
     const d = Object.fromEntries(new FormData(f));
-    const body = { role: d.role, name: d.name, email: d.email, phone: d.phone, password: d.password, vehicle: d.vehicle };
+    // In the shared pilot the Claude account is the login; the password is never used.
+    const password = SHARED ? Array.from(crypto.getRandomValues(new Uint8Array(18)), (b) => b.toString(16).padStart(2, '0')).join('') : d.password;
+    const body = { role: d.role, name: d.name, email: d.email, phone: d.phone, password, vehicle: d.vehicle };
     if (d.role !== 'driver') body.organization = { name: d.org_name, license_no: d.license_no, address: d.address, city: d.city };
     signedIn(await api('POST', '/api/auth/register', body));
   });
@@ -1203,7 +1220,7 @@ const importState = { rows: null, fileName: null, hideMissing: false, skipErrors
 
 async function renderImport(view) {
   const [{ products }, settings] = await Promise.all([api('GET', '/api/supplier/products'), api('GET', '/api/supplier/settings')]);
-  const canDownload = !window.maaDemo && !!window.XLSX;
+  const canDownload = !window.maaInBrowser && !!window.XLSX;
   const st = importState;
 
   view.innerHTML = `
@@ -1429,7 +1446,7 @@ Content-Type: application/json
   "dry_run": false
 }</pre>
         <p>${t('Use dry_run: true to see the changes without saving. The answer lists new, updated and hidden products and any row errors. Column names can be the same Arabic or English names as in Excel.')}</p>
-        ${window.maaDemo ? `<p class="muted">${t('In this demo the API cannot be reached from outside your browser.')}</p>` : ''}
+        ${window.maaInBrowser ? `<p class="muted">${t('In this version the API cannot be reached from outside the browser.')}</p>` : ''}
       </details>
     </div>`;
 
@@ -1505,7 +1522,7 @@ async function renderAdmin(view) {
       <div class="card table-wrap"><h2>${t('Pharmacies & suppliers')}</h2><table>
         <tr><th>${t('Name')}</th><th>${t('Type')}</th><th>${t('License')}</th><th>${t('Address')}</th><th>${t('Status')}</th><th></th></tr>
         ${organizations.map((o) => `<tr>
-          <td>${esc(o.name)}</td><td>${esc(t(o.type))}</td><td>${ltr(o.license_no)}</td><td class="small">${esc([o.address, o.city].filter(Boolean).join(', '))}</td>
+          <td>${esc(o.name)}${o.contact_name ? `<div class="small muted">${esc(o.contact_name)} · ${ltr(o.contact_phone || '')}<br>${ltr(o.contact_email || '')}</div>` : ''}</td><td>${esc(t(o.type))}</td><td>${ltr(o.license_no)}</td><td class="small">${esc([o.address, o.city].filter(Boolean).join(', '))}</td>
           <td>${o.verified ? `<span class="status delivered">${t('Verified')}</span>` : `<span class="status placed">${t('Pending')}</span>`}</td>
           <td><button data-org="${o.id}" data-v="${o.verified ? 0 : 1}" class="${o.verified ? 'danger' : 'primary'}">${t(o.verified ? 'Suspend' : 'Verify')}</button></td>
         </tr>`).join('')}
@@ -1632,10 +1649,46 @@ function highlightStep() {
   $(s.target, $('#view'))?.classList.add('hint');
 }
 
+// ---------------------------------------------------------------- shared pilot
+
+const SHARED_PROBLEM = {
+  not_setup: 'The owner has not set up the shared data yet. Ask them to open this link once, then reload this page.',
+  no_access: 'You cannot reach the shared data. Make sure you are signed in to Claude and that the owner added you to this link as an Editor.',
+  error: 'The shared data could not be loaded. Check the internet connection and reload the page.',
+};
+
+function renderSharedProblem(view) {
+  view.innerHTML = `
+    <div class="auth card stack">
+      <h1>${t('Maa')}</h1>
+      <p>${t(SHARED_PROBLEM[state.sharedProblem] || SHARED_PROBLEM.error)}</p>
+      <button id="retry">${t('Try again')}</button>
+    </div>`;
+  $('#retry', view).onclick = () => location.reload();
+}
+
+async function bootShared() {
+  try {
+    const s = await api('GET', '/api/session');
+    if (s.user) { state.token = s.token; state.user = s.user; localSet('maa.token', s.token); } else { state.token = null; state.user = null; }
+  } catch (e) {
+    state.sharedProblem = e.details?.code && SHARED_PROBLEM[e.details.code] ? e.details.code : 'error';
+  }
+  // Someone else saved: show it, unless this person is typing or has a panel open.
+  window.addEventListener('maa:data', async () => {
+    // An approval may have just arrived: refresh who this person is (a local read).
+    if (state.user) state.user = (await api('GET', '/api/me').catch(() => null))?.user || state.user;
+    const typing = document.activeElement?.matches?.('input, textarea, select');
+    if (!typing && !$('.sheet-back')) render();
+  });
+  render();
+}
+
 // ---------------------------------------------------------------- boot
 
 (async function boot() {
   try { state.config = await api('GET', '/api/config'); } catch { /* use defaults */ }
+  if (SHARED) { await bootShared(); return; }
   if (state.token) {
     try { state.user = (await api('GET', '/api/me')).user; } catch { state.token = null; localSet('maa.token', null); }
   }

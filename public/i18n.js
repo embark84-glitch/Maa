@@ -239,6 +239,15 @@ const I18N = (() => {
     'Barcode {value} appears more than once': 'الباركود {value} مكرر في الملف', 'Photo link must start with https://': 'رابط الصورة يجب أن يبدأ بـ https://',
     'New photo': 'صورة جديدة', 'No photo': 'بلا صورة',
 
+    // shared pilot
+    'Welcome to Maa': 'مرحباً بك في Maa',
+    'Create your account once. It is linked to the Claude account you are signed in with, so there is no password to remember.': 'أنشئ حسابك مرة واحدة. يرتبط بحساب Claude الذي سجّلت الدخول به، فلا تحتاج كلمة مرور.',
+    'The owner has not set up the shared data yet. Ask them to open this link once, then reload this page.': 'لم يجهّز صاحب الرابط البيانات المشتركة بعد. اطلب منه فتح الرابط مرة واحدة، ثم أعد تحميل هذه الصفحة.',
+    'You cannot reach the shared data. Make sure you are signed in to Claude and that the owner added you to this link as an Editor.': 'لا يمكنك الوصول إلى البيانات المشتركة. تأكد أنك مسجّل الدخول إلى Claude وأن صاحب الرابط أضافك إليه بصلاحية «محرر» (Editor).',
+    'The shared data could not be loaded. Check the internet connection and reload the page.': 'تعذّر تحميل البيانات المشتركة. تحقّق من الاتصال بالإنترنت وأعد تحميل الصفحة.',
+    'Try again': 'حاول مجدداً', 'Maa': 'Maa',
+    'In this version the API cannot be reached from outside the browser.': 'في هذه النسخة لا يمكن الوصول إلى الـ API من خارج المتصفح.',
+
     'Request failed ({status})': 'تعذّر تنفيذ العملية ({status})',
   };
 
@@ -284,6 +293,12 @@ const I18N = (() => {
     [/^Photo reading needs permission/, 'قراءة الصور تحتاج إذنك باستخدام Claude.'],
     [/^Barcode must be 8 to 14 digits$/, 'الباركود يجب أن يكون من 8 إلى 14 رقماً'],
     [/^Image not found$/, 'غير موجود'],
+    [/^You already have an account/, 'لديك حساب بالفعل. أعد تحميل الصفحة.'],
+    [/^You are signed in with your Claude account$/, 'أنت مسجّل الدخول بحساب Claude الخاص بك'],
+    [/^Someone else is saving right now/, 'شخص آخر يحفظ تغييراً الآن. حاول بعد لحظة.'],
+    [/^Saving failed/, 'فشل الحفظ. تحقّق من الاتصال وحاول مجدداً.'],
+    [/^Could not load the shared data/, 'تعذّر تحميل البيانات المشتركة. تحقّق من الاتصال وأعد تحميل الصفحة.'],
+    [/^The shared data is not available$/, 'البيانات المشتركة غير متاحة'],
     [/^Internal (server )?error$/, 'حدث خطأ في الخادم. حاول مرة أخرى.'],
   ];
 

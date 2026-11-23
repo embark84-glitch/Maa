@@ -1,7 +1,7 @@
 'use strict';
 /* Database schema and transaction helper. No Node-only APIs: also used by the browser demo. */
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 const SCHEMA = `
 PRAGMA foreign_keys = ON;
@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS users (
   org_id        INTEGER REFERENCES organizations(id),
   vehicle       TEXT,
   approved      INTEGER NOT NULL DEFAULT 1,     -- drivers need admin approval
+  claude_id     TEXT UNIQUE,                    -- shared-link pilot: the Claude account this login belongs to
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -157,6 +158,10 @@ const MIGRATIONS = {
   3: [
     'ALTER TABLE products ADD COLUMN barcode TEXT',
     'ALTER TABLE products ADD COLUMN image_url TEXT',
+  ],
+  4: [
+    'ALTER TABLE users ADD COLUMN claude_id TEXT',
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_claude ON users(claude_id)',
   ],
 };
 

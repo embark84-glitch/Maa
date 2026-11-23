@@ -22,7 +22,7 @@ const SQLJS = 'https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-asm.js';
 
 // Modules that run in the browser, and Node-only modules swapped for browser versions.
 const MODULES = [
-  'standalone/demo-server', 'standalone/auth-browser',
+  'standalone/demo-server', 'standalone/auth-browser', 'standalone/shared-sync',
   'src/http', 'src/store', 'src/validate', 'src/policy', 'src/seed',
   'src/routes/index', 'src/routes/auth', 'src/routes/catalog', 'src/routes/supplier',
   'src/routes/orders', 'src/routes/deliveries', 'src/routes/admin',
@@ -77,13 +77,24 @@ const imgSrc = path.join(root, 'public', 'img');
 fs.cpSync(imgSrc, path.join(__dirname, 'img'), { recursive: true });
 console.log(`Wrote ${path.relative(root, out)} (${(html.length / 1024).toFixed(0)} KB)`);
 
-if (process.argv[2]) {
-  const head = html.match(/<head>([\s\S]*?)<\/head>/)[1]
+/** The page as a body fragment (no <html>/<head>/<body>), for hosts that add their own skeleton. */
+function fragment(page, { title, mode }) {
+  let head = page.match(/<head>([\s\S]*?)<\/head>/)[1]
     .replace(/<meta charset[^>]*>\s*/, '')
     .replace(/<meta name="viewport"[^>]*>\s*/, '<meta name="claude:viewport-fit-sides" content="cover">\n  ');
-  const body = html.match(/<body>([\s\S]*?)<\/body>/)[1];
+  const oldTitle = head.match(/<title>[^<]*<\/title>/)[0];
+  head = head.replace(oldTitle, '').trim();
+  let body = page.match(/<body>([\s\S]*?)<\/body>/)[1].trim();
+  if (mode) body = body.replace(`<script src="${SQLJS}"></script>`, () => `<script>window.MAA_MODE = ${JSON.stringify(mode)};</script>\n  <script src="${SQLJS}"></script>`);
   // Title first, so hosts that scan the start of the file find it.
-  const title = head.match(/<title>[^<]*<\/title>/)[0];
-  fs.writeFileSync(process.argv[2], `${title}\n${head.replace(title, '').trim()}\n${body.trim()}\n`);
-  console.log(`Wrote fragment ${process.argv[2]}`);
+  return `<title>${title}</title>\n${head}\n${body}\n`;
+}
+
+if (process.argv[2]) {
+  fs.writeFileSync(process.argv[2], fragment(html, { title: 'Maa Pharmacy Supply' }));
+  console.log(`Wrote demo fragment ${process.argv[2]}`);
+}
+if (process.argv[3]) {
+  fs.writeFileSync(process.argv[3], fragment(html, { title: 'Maa Pharmacy Network', mode: 'shared' }));
+  console.log(`Wrote shared pilot fragment ${process.argv[3]}`);
 }

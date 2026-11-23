@@ -5,7 +5,11 @@ const v = require('../validate');
 /** Platform admin: verify pharmacy/supplier licenses and approve drivers. */
 module.exports = (app, { db }) => {
   app.get('/api/admin/overview', requireRole('admin'), (_req, res) => {
-    const organizations = db.prepare('SELECT * FROM organizations ORDER BY verified, created_at DESC').all()
+    const organizations = db.prepare(`
+      SELECT o.*, u.name AS contact_name, u.email AS contact_email, u.phone AS contact_phone
+        FROM organizations o
+        LEFT JOIN users u ON u.id = (SELECT MIN(id) FROM users WHERE org_id = o.id)
+       ORDER BY o.verified, o.created_at DESC`).all()
       .map((o) => ({ ...o, verified: !!o.verified }));
     const drivers = db.prepare("SELECT id, name, email, phone, vehicle, approved, created_at FROM users WHERE role = 'driver' ORDER BY approved, created_at DESC").all()
       .map((d) => ({ ...d, approved: !!d.approved }));

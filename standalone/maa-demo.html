@@ -262,7 +262,7 @@ fieldset.pay-options legend + * { clear: both; }
 .tiles { display: grid; gap: .5rem; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
 .tile { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: .55rem .7rem; display: grid; gap: .1rem; }
 .tile span { font-size: .78rem; color: var(--muted); }
-.tile strong { font-size: 1.3rem; font-variant-numeric: tabular-nums; }
+.tile strong { font-size: clamp(1rem, 4.5vw, 1.3rem); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .tile.bad { border-color: var(--danger); }
 .tile.bad strong { color: var(--danger); }
 
@@ -342,10 +342,15 @@ label.btn { display: inline-flex; align-items: center; gap: .4rem; cursor: point
   var defs = {"standalone/demo-server": function (module, exports, require) {
 'use strict';
 /*
- * Runs the real Maa server inside the browser for the standalone demo:
+ * Runs the real Maa server inside the browser:
  *   - the route modules from src/routes (same code as the Node server),
- *   - on SQLite compiled to JavaScript (sql.js), saved in this browser's storage,
+ *   - on SQLite compiled to JavaScript (sql.js),
  *   - behind window.fetch, so the web client talks to it exactly as it would to a server.
+ *
+ * Two modes, chosen at build time (window.MAA_MODE):
+ *   demo    data lives in this browser only; demo accounts and a guided walkthrough.
+ *   shared  the pilot: one database shared by everyone the artifact is shared with
+ *           (standalone/shared-sync.js), each Maa account tied to a Claude account.
  * Bundled by standalone/build.js; `require` here is the bundle's module loader.
  */
 const { applySchema } = require('../src/store');
@@ -353,6 +358,11 @@ const { attachUser, HttpError, errorBody } = require('../src/http');
 const { verifyToken } = require('../src/auth'); // mapped to standalone/auth-browser.js
 const registerRoutes = require('../src/routes');
 const { seed, DEMO_PASSWORD } = require('../src/seed');
+const { hashPassword } = require('../src/auth');
+const { createSharedSync, toB64: b64Of, fromB64: bytesOf } = require('./shared-sync');
+
+const SHARED = window.MAA_MODE === 'shared';
+window.maaInBrowser = true;
 
 // The web client reads the shared rules as globals.
 window.MaaPayment = require('../shared/payment');
@@ -364,25 +374,26 @@ const OLD_KEYS = ['maa.demo.db', 'maa.demo.db.v2', 'maa.cart', 'maa.demo.sqlite.
 
 // ---------- node:sqlite-style wrapper over sql.js ----------
 
-function wrap(raw) {
+function wrap(getRaw) {
   const statement = (sql) => ({
     run(...args) {
+      const raw = getRaw();
       const st = raw.prepare(sql);
       try { st.bind(args); st.step(); } finally { st.free(); }
       return { changes: raw.getRowsModified(), lastInsertRowid: raw.exec('SELECT last_insert_rowid()')[0].values[0][0] };
     },
     get(...args) {
-      const st = raw.prepare(sql);
+      const st = getRaw().prepare(sql);
       try { st.bind(args); return st.step() ? st.getAsObject() : undefined; } finally { st.free(); }
     },
     all(...args) {
-      const st = raw.prepare(sql);
+      const st = getRaw().prepare(sql);
       const rows = [];
       try { st.bind(args); while (st.step()) rows.push(st.getAsObject()); } finally { st.free(); }
       return rows;
     },
   });
-  return { exec: (sql) => { raw.exec(sql); }, prepare: statement };
+  return { exec: (sql) => { getRaw().exec(sql); }, prepare: statement };
 }
 
 const toB64 = (bytes) => {
@@ -460,32 +471,62 @@ async function demoRecognize({ prompt, mime, bytes }) {
 
 // ---------- boot ----------
 
-let db = null;
 let raw = null;
+const db = wrap(() => raw);
 const router = createRouter();
+let SQL = null;
+let sync = null;          // shared mode
+let store = null;         // shared mode: the db capability
+let me = null;            // shared mode: { id, isOwner }
 
 function save() {
-  if (!raw) return;
+  if (SHARED || !raw) return;
   const ok = storage.set(STORE_KEY, toB64(raw.export()));
   raw.exec('PRAGMA foreign_keys = ON'); // export() reopens the database and resets pragmas
   if (!ok) console.warn('Maa demo: browser storage is full or blocked; changes last until the page is closed.');
 }
 
-const ready = (async () => {
-  if (typeof initSqlJs !== 'function') throw new Error('sql.js did not load');
-  const SQL = await initSqlJs();
+function openBytes(bytes) {
+  raw?.close();
+  raw = bytes ? new SQL.Database(bytes) : new SQL.Database();
+  applySchema(db);
+  raw.exec('PRAGMA foreign_keys = ON');
+}
+
+async function bootDemo() {
   OLD_KEYS.forEach(storage.del);
   const saved = storage.get(STORE_KEY);
-  try {
-    raw = saved ? new SQL.Database(fromB64(saved)) : new SQL.Database();
-    db = wrap(raw);
-    applySchema(db);
-  } catch {
-    raw = new SQL.Database(); // unreadable or outdated save: start over
-    db = wrap(raw);
-    applySchema(db);
-  }
+  try { openBytes(saved ? fromB64(saved) : null); } catch { openBytes(null); } // unreadable or outdated save: start over
   if (seed(db)) save();
+}
+
+/** Shared pilot: connect to the artifact's database and identify the viewer. */
+async function bootShared() {
+  window.maaShared = { status: 'loading' };
+  const [dbCap, userCap] = await Promise.all([window.claude?.use?.('db'), window.claude?.use?.('user')]);
+  const id = userCap ? await userCap.id() : null;
+  if (!dbCap || !id) { window.maaShared = { status: 'no_access' }; return; }
+  store = dbCap;
+  me = { id, isOwner: (await userCap.isOwner()) ?? false };
+  const holder = `${id}.${Math.random().toString(36).slice(2, 8)}`;
+  sync = createSharedSync({
+    store, holder, open: openBytes,
+    exportBytes: () => { const b = raw.export(); raw.exec('PRAGMA foreign_keys = ON'); return b; },
+    onRemote: () => window.dispatchEvent(new Event('maa:data')),
+  });
+  const status = await sync.start({
+    canCreate: me.isOwner,
+    // A fresh shared database holds one account: the platform admin, tied to the owner.
+    create: () => db.prepare(`INSERT INTO users (name, email, phone, password_hash, role, approved, claude_id)
+      VALUES (?, ?, ?, ?, 'admin', 1, ?)`).run('مدير المنصة', 'owner@maa.local', '-', hashPassword(Math.random().toString(36)), me.id),
+  });
+  window.maaShared = { status, isOwner: me.isOwner };
+}
+
+const ready = (async () => {
+  if (typeof initSqlJs !== 'function') throw new Error('sql.js did not load');
+  SQL = await initSqlJs();
+  if (SHARED) await bootShared(); else await bootDemo();
   const ctx = { db, secret: 'demo', ...CONFIG, recognize: demoRecognize };
   router.attachUser = attachUser(ctx, verifyToken);
   registerRoutes(router.app, ctx);
@@ -493,11 +534,73 @@ const ready = (async () => {
 
 ready.catch((e) => {
   console.error(e);
+  if (SHARED) window.maaShared = { status: 'error' };
   const view = document.getElementById('view');
-  if (view) {
+  if (view && !SHARED) {
     view.innerHTML = '<div class="card">تعذّر تشغيل النسخة التجريبية لأن مكتبة قاعدة البيانات لم تُحمَّل. تحقّق من الاتصال بالإنترنت ثم أعد تحميل الصفحة.<br><span class="small muted">The demo database library did not load. Check the internet connection and reload.</span></div>';
   }
 });
+
+// ---------- shared pilot: identity, photos, session ----------
+
+const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+const tokenFor = (uid) => btoa(JSON.stringify({ uid }));
+const IMG_PATH = /^\/api\/product-images\/(\d+)$/;
+const IMG_EDIT = /^\/api\/supplier\/products\/(\d+)\/image$/;
+
+/** Answers that need no route, and checks that a request really comes from this viewer's account. */
+async function sharedPreflight(method, url, req) {
+  const status = window.maaShared?.status;
+  if (status !== 'ready') return json(503, { error: 'The shared data is not available', details: { code: status || 'error' } });
+
+  if (url.pathname === '/api/session') {
+    const row = db.prepare('SELECT id FROM users WHERE claude_id = ?').get(me.id);
+    if (!row) return json(200, { user: null, isOwner: me.isOwner });
+    const token = tokenFor(row.id);
+    const r = await handle('GET', new URL('/api/me', location.href), new Headers({ authorization: `Bearer ${token}` }));
+    return json(200, { token, user: (await r.json()).user, isOwner: me.isOwner });
+  }
+  if (url.pathname === '/api/auth/login') return json(403, { error: 'You are signed in with your Claude account' });
+  if (url.pathname === '/api/auth/register' && db.prepare('SELECT 1 FROM users WHERE claude_id = ?').get(me.id)) {
+    return json(409, { error: 'You already have an account. Reload the page.' });
+  }
+  if (method === 'GET' && IMG_PATH.test(url.pathname)) {
+    const snap = await store.doc(`maa/img-${IMG_PATH.exec(url.pathname)[1]}`).get();
+    if (!snap.exists) return json(404, { error: 'Image not found' });
+    const { mime, b64 } = snap.data();
+    return new Response(bytesOf(b64), { status: 200, headers: { 'content-type': mime } });
+  }
+  // A token may only act for the account tied to this Claude account.
+  const auth = req.get('authorization') || '';
+  if (auth.startsWith('Bearer ')) {
+    const uid = verifyToken(auth.slice(7))?.uid;
+    const owner = db.prepare('SELECT claude_id FROM users WHERE id = ?').get(uid)?.claude_id;
+    if (owner !== me.id) return json(401, { error: 'Login required' });
+  }
+  return null;
+}
+
+/** After a successful change: tie new accounts to this viewer, keep photos out of the shared file. */
+async function sharedAfter(method, url, req, res) {
+  if (res.statusCode >= 400) return false;
+  if (method === 'POST' && url.pathname === '/api/auth/register') {
+    db.prepare('UPDATE users SET claude_id = ? WHERE id = ?').run(me.id, res.payload.user.id);
+    res.payload.token = tokenFor(res.payload.user.id);
+    return true;
+  }
+  const m = IMG_EDIT.exec(url.pathname);
+  if (m && method === 'PUT') {
+    const row = db.prepare('SELECT mime, data FROM product_images WHERE product_id = ?').get(Number(m[1]));
+    await store.doc(`maa/img-${m[1]}`).set({ mime: row.mime, b64: b64Of(row.data), at: new Date().toISOString() });
+    db.prepare('DELETE FROM product_images WHERE product_id = ?').run(Number(m[1]));
+    return true;
+  }
+  if (m && method === 'DELETE') {
+    await store.doc(`maa/img-${m[1]}`).delete();
+    return true;
+  }
+  return false;
+}
 
 async function handle(method, url, headers, bodyText) {
   const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -521,14 +624,33 @@ async function handle(method, url, headers, bodyText) {
     json(obj) { this.payload = obj; this.sent = true; return this; },
     send(bytes) { this.binary = bytes; this.sent = true; return this; },
   };
-  try {
+  const runRoute = async () => {
     await router.run([router.attachUser], req, res);
     const found = router.match(method, url.pathname);
     if (!found) throw new HttpError(404, 'Not found');
     req.params = found.params;
     await router.run(found.route.handlers, req, res);
     if (!res.sent) throw new Error(`No response from ${method} ${url.pathname}`);
-    if (method !== 'GET') save();
+  };
+  try {
+    if (SHARED) {
+      const early = await sharedPreflight(method, url, req);
+      if (early) return early;
+    }
+    // Reading a photo or previewing a file changes nothing: no need to hold the save lock.
+    const readOnly = method === 'GET' || /\/recognize$/.test(url.pathname)
+      || (url.pathname === '/api/supplier/products/import' && body?.dry_run !== false);
+    if (SHARED && !readOnly) {
+      await sync.write(async () => {
+        const before = raw.exec('SELECT total_changes()')[0].values[0][0];
+        await runRoute();
+        const moved = await sharedAfter(method, url, req, res);
+        return moved || raw.exec('SELECT total_changes()')[0].values[0][0] !== before;
+      });
+    } else {
+      await runRoute();
+      if (method !== 'GET') save();
+    }
     if (res.binary) return new Response(res.binary, { status: res.statusCode, headers: res.headers });
     return reply(res.statusCode, res.payload);
   } catch (err) {
@@ -545,10 +667,10 @@ window.fetch = async (input, init = {}) => {
   return handle((init.method || 'GET').toUpperCase(), url, new Headers(init.headers || {}), init.body);
 };
 
-// ---------- hooks for the guide in app.js ----------
+// ---------- hooks for the guide in app.js (demo mode only) ----------
 
 const TERMINAL = "('delivered', 'rejected', 'cancelled')";
-window.maaDemo = {
+if (!SHARED) window.maaDemo = {
   password: DEMO_PASSWORD,
   accounts: [
     { email: 'pharmacy@maa.test', label: 'Pharmacy' },
@@ -570,7 +692,7 @@ window.maaDemo = {
   },
 };
 
-window.maaResetDemo = () => {
+if (!SHARED) window.maaResetDemo = () => {
   [STORE_KEY, 'maa.token', 'maa.drafts', 'maa.tabs'].forEach(storage.del);
   location.hash = '';
   location.reload();
@@ -595,6 +717,169 @@ module.exports = {
   generateApiKey: () => `maa_${rand(24)}`,
   hashApiKey: (key) => `demo$${key}`,
 };
+
+},
+"standalone/shared-sync": function (module, exports, require) {
+'use strict';
+/*
+ * Shared-link pilot: keeps one Maa database shared by everyone on the artifact,
+ * using the artifact's `db` capability.
+ *
+ * The whole SQLite file is the unit of truth. It is gzipped, base64-encoded and
+ * stored in chunks (documents are capped at 256 KiB), with a small `maa/head`
+ * document naming the current version. Every change:
+ *   1. takes the `maa/lock` lease (one writer at a time),
+ *   2. downloads the newest version if this browser is behind,
+ *   3. runs the real server route on it,
+ *   4. uploads the new version (chunks first, then head) and releases the lease.
+ * Every open page listens to `maa/head` and reloads when someone else saves.
+ *
+ * Product photos live in their own documents (`maa/img-<productId>`), so a save
+ * does not re-upload them.
+ */
+const { HttpError } = require('../src/http');
+
+const CHUNK = 180_000;              // base64 characters per document (well under 256 KiB)
+const LOCK_TTL = 15_000;
+const LOCK_WAIT = 25_000;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const randomId = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => b.toString(36).padStart(2, '0')).join('');
+
+function toB64(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+const fromB64 = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+
+async function pipe(bytes, stream) {
+  const out = new Response(new Blob([bytes]).stream().pipeThrough(stream));
+  return new Uint8Array(await out.arrayBuffer());
+}
+const gzip = (bytes) => pipe(bytes, new CompressionStream('gzip'));
+const gunzip = (bytes) => pipe(bytes, new DecompressionStream('gzip'));
+
+/**
+ * @param store   the `db` capability namespace
+ * @param holder  a stable string for this tab (lease holder)
+ * @param open    (bytes|null) => void  replaces the local database with these bytes (null = new)
+ * @param exportBytes () => Uint8Array  current local database file
+ * @param onRemote () => void  called after another person's save was loaded
+ */
+function createSharedSync({ store, holder, open, exportBytes, onRemote }) {
+  const headRef = store.doc('maa/head');
+  const lockRef = store.doc('maa/lock');
+  let local = null;        // { tag, version, bytes } of the version loaded here
+  let writing = false;
+  let pendingRemote = null;
+
+  async function download(head) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const parts = await Promise.all(Array.from({ length: head.chunks }, (_, i) => store.doc(`maa/s-${head.tag}-${i}`).get()));
+      if (parts.every((p) => p.exists)) return gunzip(fromB64(parts.map((p) => p.data().d).join('')));
+      // A newer save replaced this version while we were reading: read the new head.
+      const fresh = (await headRef.get()).data();
+      if (!fresh) break;
+      head = fresh;
+    }
+    throw new HttpError(503, 'Could not load the shared data. Check the connection and reload.', { code: 'sync_failed' });
+  }
+
+  async function load(head) {
+    const bytes = await download(head);
+    open(bytes);
+    local = { tag: head.tag, version: head.version, bytes, chunksCount: head.chunks };
+  }
+
+  async function upload() {
+    const bytes = exportBytes();
+    const b64 = toB64(await gzip(bytes));
+    const version = (local?.version || 0) + 1;
+    const tag = `${version}-${randomId()}`;
+    const chunks = Math.max(1, Math.ceil(b64.length / CHUNK));
+    for (let i = 0; i < chunks; i++) await store.doc(`maa/s-${tag}-${i}`).set({ d: b64.slice(i * CHUNK, (i + 1) * CHUNK) });
+    const previous = local;
+    await headRef.set({ tag, version, chunks, at: new Date().toISOString(), bytes: bytes.length });
+    local = { tag, version, bytes, chunksCount: chunks };
+    // Best effort: remove the replaced version's chunks (a reader caught mid-download re-reads the head).
+    if (previous?.tag && previous.chunksCount) {
+      for (let i = 0; i < previous.chunksCount; i++) store.doc(`maa/s-${previous.tag}-${i}`).delete().catch(() => {});
+    }
+  }
+
+  async function lock() {
+    const until = Date.now() + LOCK_WAIT;
+    for (;;) {
+      const r = await lockRef.acquire({ holder, ttlMs: LOCK_TTL });
+      if (r.acquired) return;
+      if (Date.now() > until) throw new HttpError(503, 'Someone else is saving right now. Try again in a moment.', { code: 'busy' });
+      await sleep(250 + Math.random() * 350);
+    }
+  }
+  // Leases have no release call: renewing with the shortest length ends it within a second.
+  const unlock = () => lockRef.acquire({ holder, ttlMs: 1000 }).catch(() => {});
+
+  return {
+    /** First load. Resolves 'ready', or 'not_setup' when nobody has created the shared data yet. */
+    async start({ canCreate, create }) {
+      const head = (await headRef.get()).data();
+      if (head) {
+        await load(head);
+      } else {
+        if (!canCreate) return 'not_setup';
+        await lock();
+        try {
+          const again = (await headRef.get()).data();
+          if (again) await load(again);
+          else { open(null); create(); await upload(); }
+        } finally { unlock(); }
+      }
+      headRef.onSnapshot((snap) => {
+        const h = snap.data();
+        if (!h || h.tag === local?.tag || snap.metadata.hasPendingWrites) return;
+        if (writing) { pendingRemote = h; return; }
+        load(h).then(onRemote).catch(() => {});
+      }, () => {});
+      return 'ready';
+    },
+
+    /**
+     * Run a change against the newest shared version. `fn` returns true when it
+     * changed the database (then the new version is uploaded). On any failure the
+     * local copy goes back to the last shared version.
+     */
+    async write(fn) {
+      writing = true;
+      await lock();
+      try {
+        const head = (await headRef.get()).data();
+        if (head && head.tag !== local?.tag) await load(head);
+        let changed;
+        try {
+          changed = await fn();
+        } catch (e) {
+          open(local.bytes);
+          throw e;
+        }
+        if (changed) {
+          try { await upload(); } catch (e) {
+            open(local.bytes);
+            throw new HttpError(503, 'Saving failed. Check the connection and try again.', { code: 'sync_failed' });
+          }
+        }
+        return changed;
+      } finally {
+        unlock();
+        writing = false;
+        if (pendingRemote && pendingRemote.tag !== local?.tag) { const h = pendingRemote; pendingRemote = null; load(h).then(onRemote).catch(() => {}); }
+        pendingRemote = null;
+      }
+    },
+  };
+}
+
+module.exports = { createSharedSync, toB64, fromB64 };
 
 },
 "src/http": function (module, exports, require) {
@@ -666,7 +951,7 @@ module.exports = { HttpError, attachUser, requireRole, errorBody, toBinary, from
 'use strict';
 /* Database schema and transaction helper. No Node-only APIs: also used by the browser demo. */
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 const SCHEMA = `
 PRAGMA foreign_keys = ON;
@@ -703,6 +988,7 @@ CREATE TABLE IF NOT EXISTS users (
   org_id        INTEGER REFERENCES organizations(id),
   vehicle       TEXT,
   approved      INTEGER NOT NULL DEFAULT 1,     -- drivers need admin approval
+  claude_id     TEXT UNIQUE,                    -- shared-link pilot: the Claude account this login belongs to
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -822,6 +1108,10 @@ const MIGRATIONS = {
   3: [
     'ALTER TABLE products ADD COLUMN barcode TEXT',
     'ALTER TABLE products ADD COLUMN image_url TEXT',
+  ],
+  4: [
+    'ALTER TABLE users ADD COLUMN claude_id TEXT',
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_claude ON users(claude_id)',
   ],
 };
 
@@ -1767,7 +2057,11 @@ const v = require('../validate');
 /** Platform admin: verify pharmacy/supplier licenses and approve drivers. */
 module.exports = (app, { db }) => {
   app.get('/api/admin/overview', requireRole('admin'), (_req, res) => {
-    const organizations = db.prepare('SELECT * FROM organizations ORDER BY verified, created_at DESC').all()
+    const organizations = db.prepare(`
+      SELECT o.*, u.name AS contact_name, u.email AS contact_email, u.phone AS contact_phone
+        FROM organizations o
+        LEFT JOIN users u ON u.id = (SELECT MIN(id) FROM users WHERE org_id = o.id)
+       ORDER BY o.verified, o.created_at DESC`).all()
       .map((o) => ({ ...o, verified: !!o.verified }));
     const drivers = db.prepare("SELECT id, name, email, phone, vehicle, approved, created_at FROM users WHERE role = 'driver' ORDER BY approved, created_at DESC").all()
       .map((d) => ({ ...d, approved: !!d.approved }));
@@ -2414,6 +2708,15 @@ const I18N = (() => {
     'Barcode {value} appears more than once': 'الباركود {value} مكرر في الملف', 'Photo link must start with https://': 'رابط الصورة يجب أن يبدأ بـ https://',
     'New photo': 'صورة جديدة', 'No photo': 'بلا صورة',
 
+    // shared pilot
+    'Welcome to Maa': 'مرحباً بك في Maa',
+    'Create your account once. It is linked to the Claude account you are signed in with, so there is no password to remember.': 'أنشئ حسابك مرة واحدة. يرتبط بحساب Claude الذي سجّلت الدخول به، فلا تحتاج كلمة مرور.',
+    'The owner has not set up the shared data yet. Ask them to open this link once, then reload this page.': 'لم يجهّز صاحب الرابط البيانات المشتركة بعد. اطلب منه فتح الرابط مرة واحدة، ثم أعد تحميل هذه الصفحة.',
+    'You cannot reach the shared data. Make sure you are signed in to Claude and that the owner added you to this link as an Editor.': 'لا يمكنك الوصول إلى البيانات المشتركة. تأكد أنك مسجّل الدخول إلى Claude وأن صاحب الرابط أضافك إليه بصلاحية «محرر» (Editor).',
+    'The shared data could not be loaded. Check the internet connection and reload the page.': 'تعذّر تحميل البيانات المشتركة. تحقّق من الاتصال بالإنترنت وأعد تحميل الصفحة.',
+    'Try again': 'حاول مجدداً', 'Maa': 'Maa',
+    'In this version the API cannot be reached from outside the browser.': 'في هذه النسخة لا يمكن الوصول إلى الـ API من خارج المتصفح.',
+
     'Request failed ({status})': 'تعذّر تنفيذ العملية ({status})',
   };
 
@@ -2459,6 +2762,12 @@ const I18N = (() => {
     [/^Photo reading needs permission/, 'قراءة الصور تحتاج إذنك باستخدام Claude.'],
     [/^Barcode must be 8 to 14 digits$/, 'الباركود يجب أن يكون من 8 إلى 14 رقماً'],
     [/^Image not found$/, 'غير موجود'],
+    [/^You already have an account/, 'لديك حساب بالفعل. أعد تحميل الصفحة.'],
+    [/^You are signed in with your Claude account$/, 'أنت مسجّل الدخول بحساب Claude الخاص بك'],
+    [/^Someone else is saving right now/, 'شخص آخر يحفظ تغييراً الآن. حاول بعد لحظة.'],
+    [/^Saving failed/, 'فشل الحفظ. تحقّق من الاتصال وحاول مجدداً.'],
+    [/^Could not load the shared data/, 'تعذّر تحميل البيانات المشتركة. تحقّق من الاتصال وأعد تحميل الصفحة.'],
+    [/^The shared data is not available$/, 'البيانات المشتركة غير متاحة'],
     [/^Internal (server )?error$/, 'حدث خطأ في الخادم. حاول مرة أخرى.'],
   ];
 
@@ -2527,6 +2836,8 @@ const state = {
   refreshTimer: null,
 };
 const saveDrafts = () => localSet('maa.drafts', JSON.stringify(state.drafts));
+/** The shared-link pilot: everyone on the artifact shares one database; accounts follow Claude accounts. */
+const SHARED = window.MAA_MODE === 'shared';
 
 // ---------------------------------------------------------------- formatting
 
@@ -2557,7 +2868,7 @@ function hydrateImages(root = document) {
     const url = img.dataset.src;
     img.removeAttribute('data-src');
     img.onerror = () => { img.outerHTML = thumb({ name: img.dataset.name }, img.className.replace('thumb', '').trim()); };
-    if (window.maaDemo && url.startsWith('api/')) {
+    if (window.maaInBrowser && url.startsWith('api/')) {
       fetch(`/${url}`).then((r) => (r.ok ? r.blob() : Promise.reject())).then((b) => { img.src = URL.createObjectURL(b); }).catch(() => img.onerror());
     } else {
       img.src = url;
@@ -2677,6 +2988,7 @@ const ACTIVE_NAV = { shop: '#new', checkout: '#new', order: null };
 
 async function render() {
   clearInterval(state.refreshTimer);
+  const seq = ++render.seq;
   const view = $('#view');
   I18N.apply();
   // Routes are '#name' or '#name-12' so they survive being shared as a link.
@@ -2690,6 +3002,7 @@ async function render() {
   renderGuide();
   if (!state.user) {
     $('#nav').innerHTML = ''; $('#who').innerHTML = langBtn; bindLang();
+    if (SHARED) return state.sharedProblem ? renderSharedProblem(view) : renderRegister(view);
     return route === 'register' ? renderRegister(view) : renderLogin(view);
   }
 
@@ -2697,8 +3010,8 @@ async function render() {
   const activeHref = ACTIVE_NAV[route] !== undefined ? ACTIVE_NAV[route] : `#${route}`;
   $('#nav').innerHTML = (NAV[u.role] || []).map(([href, label]) =>
     `<a href="${href}" class="${href === activeHref ? 'active' : ''}">${t(label)}</a>`).join('');
-  $('#who').innerHTML = `<span class="name muted">${esc(u.organization?.name || u.name)}</span>${langBtn}<button class="link" id="logout">${t('Log out')}</button>`;
-  $('#logout').onclick = logout;
+  $('#who').innerHTML = `<span class="name muted">${esc(u.organization?.name || u.name)}</span>${langBtn}${SHARED ? '' : `<button class="link" id="logout">${t('Log out')}</button>`}`;
+  if (!SHARED) $('#logout').onclick = logout;
   bindLang();
 
   if ((u.organization && !u.organization.verified) || !u.approved) return renderPending(view);
@@ -2711,12 +3024,22 @@ async function render() {
   };
   const fn = routes[route];
   if (!fn) { location.hash = HOME[u.role]; return; }
-  view.innerHTML = `<p class="muted">${t('Loading…')}</p>`;
-  try { await fn(view, param); } catch (e) { view.innerHTML = `<div class="card">${esc(e.message)}</div>`; }
-  hydrateImages(view);
+  // Each render builds a fresh page and only the newest one is shown, so a slow
+  // earlier render can never overwrite the page the person has since moved to.
+  const page = `${route}-${param ?? ''}`;
+  if (render.page !== page) view.innerHTML = `<p class="muted">${t('Loading…')}</p>`;
+  render.page = page;
+  const next = document.createElement('main');
+  next.id = 'view';
+  next.className = 'view';
+  try { await fn(next, param); } catch (e) { next.innerHTML = `<div class="card">${esc(e.message)}</div>`; }
+  if (seq !== render.seq) return;
+  $('#view').replaceWith(next);
+  hydrateImages(next);
   highlightStep();
 }
 
+render.seq = 0;
 window.addEventListener('hashchange', render);
 
 // ---------------------------------------------------------------- sign in
@@ -2764,7 +3087,8 @@ function renderLogin(view) {
 function renderRegister(view) {
   view.innerHTML = `
     <div class="auth card stack">
-      <h1>${t('Create an account')}</h1>
+      <h1>${t(SHARED ? 'Welcome to Maa' : 'Create an account')}</h1>
+      ${SHARED ? `<p class="callout small">${t('Create your account once. It is linked to the Claude account you are signed in with, so there is no password to remember.')}</p>` : ''}
       <form id="f" class="stack">
         <label>${t('I am a')}
           <select name="role" id="role">
@@ -2776,7 +3100,7 @@ function renderRegister(view) {
         <label>${t('Your name')}<input name="name" required></label>
         <label>${t('Email')}<input name="email" type="email" dir="ltr" required></label>
         <label>${t('Phone')}<input name="phone" type="tel" dir="ltr" placeholder="+218 9x xxx xxxx" required></label>
-        <label>${t('Password (min 8 characters)')}<input name="password" type="password" dir="ltr" minlength="8" required></label>
+        ${SHARED ? '' : `<label>${t('Password (min 8 characters)')}<input name="password" type="password" dir="ltr" minlength="8" required></label>`}
         <div id="org" class="stack">
           <label>${t('Business name')}<input name="org_name" required></label>
           <label>${t('License number')}<input name="license_no" required></label>
@@ -2787,7 +3111,7 @@ function renderRegister(view) {
         <p class="small muted">${t('Licenses are checked by Maa before you can buy or sell.')}</p>
         <button class="primary" type="submit">${t('Create an account')}</button>
       </form>
-      <p class="small"><a href="#login">${t('Back to sign in')}</a></p>
+      ${SHARED ? '' : `<p class="small"><a href="#login">${t('Back to sign in')}</a></p>`}
     </div>`;
   const f = $('#f', view);
   $('#role', view).onchange = () => {
@@ -2799,7 +3123,9 @@ function renderRegister(view) {
   f.onsubmit = action(async (ev) => {
     ev.preventDefault();
     const d = Object.fromEntries(new FormData(f));
-    const body = { role: d.role, name: d.name, email: d.email, phone: d.phone, password: d.password, vehicle: d.vehicle };
+    // In the shared pilot the Claude account is the login; the password is never used.
+    const password = SHARED ? Array.from(crypto.getRandomValues(new Uint8Array(18)), (b) => b.toString(16).padStart(2, '0')).join('') : d.password;
+    const body = { role: d.role, name: d.name, email: d.email, phone: d.phone, password, vehicle: d.vehicle };
     if (d.role !== 'driver') body.organization = { name: d.org_name, license_no: d.license_no, address: d.address, city: d.city };
     signedIn(await api('POST', '/api/auth/register', body));
   });
@@ -3708,7 +4034,7 @@ const importState = { rows: null, fileName: null, hideMissing: false, skipErrors
 
 async function renderImport(view) {
   const [{ products }, settings] = await Promise.all([api('GET', '/api/supplier/products'), api('GET', '/api/supplier/settings')]);
-  const canDownload = !window.maaDemo && !!window.XLSX;
+  const canDownload = !window.maaInBrowser && !!window.XLSX;
   const st = importState;
 
   view.innerHTML = `
@@ -3934,7 +4260,7 @@ Content-Type: application/json
   "dry_run": false
 }</pre>
         <p>${t('Use dry_run: true to see the changes without saving. The answer lists new, updated and hidden products and any row errors. Column names can be the same Arabic or English names as in Excel.')}</p>
-        ${window.maaDemo ? `<p class="muted">${t('In this demo the API cannot be reached from outside your browser.')}</p>` : ''}
+        ${window.maaInBrowser ? `<p class="muted">${t('In this version the API cannot be reached from outside the browser.')}</p>` : ''}
       </details>
     </div>`;
 
@@ -4010,7 +4336,7 @@ async function renderAdmin(view) {
       <div class="card table-wrap"><h2>${t('Pharmacies & suppliers')}</h2><table>
         <tr><th>${t('Name')}</th><th>${t('Type')}</th><th>${t('License')}</th><th>${t('Address')}</th><th>${t('Status')}</th><th></th></tr>
         ${organizations.map((o) => `<tr>
-          <td>${esc(o.name)}</td><td>${esc(t(o.type))}</td><td>${ltr(o.license_no)}</td><td class="small">${esc([o.address, o.city].filter(Boolean).join(', '))}</td>
+          <td>${esc(o.name)}${o.contact_name ? `<div class="small muted">${esc(o.contact_name)} · ${ltr(o.contact_phone || '')}<br>${ltr(o.contact_email || '')}</div>` : ''}</td><td>${esc(t(o.type))}</td><td>${ltr(o.license_no)}</td><td class="small">${esc([o.address, o.city].filter(Boolean).join(', '))}</td>
           <td>${o.verified ? `<span class="status delivered">${t('Verified')}</span>` : `<span class="status placed">${t('Pending')}</span>`}</td>
           <td><button data-org="${o.id}" data-v="${o.verified ? 0 : 1}" class="${o.verified ? 'danger' : 'primary'}">${t(o.verified ? 'Suspend' : 'Verify')}</button></td>
         </tr>`).join('')}
@@ -4137,10 +4463,46 @@ function highlightStep() {
   $(s.target, $('#view'))?.classList.add('hint');
 }
 
+// ---------------------------------------------------------------- shared pilot
+
+const SHARED_PROBLEM = {
+  not_setup: 'The owner has not set up the shared data yet. Ask them to open this link once, then reload this page.',
+  no_access: 'You cannot reach the shared data. Make sure you are signed in to Claude and that the owner added you to this link as an Editor.',
+  error: 'The shared data could not be loaded. Check the internet connection and reload the page.',
+};
+
+function renderSharedProblem(view) {
+  view.innerHTML = `
+    <div class="auth card stack">
+      <h1>${t('Maa')}</h1>
+      <p>${t(SHARED_PROBLEM[state.sharedProblem] || SHARED_PROBLEM.error)}</p>
+      <button id="retry">${t('Try again')}</button>
+    </div>`;
+  $('#retry', view).onclick = () => location.reload();
+}
+
+async function bootShared() {
+  try {
+    const s = await api('GET', '/api/session');
+    if (s.user) { state.token = s.token; state.user = s.user; localSet('maa.token', s.token); } else { state.token = null; state.user = null; }
+  } catch (e) {
+    state.sharedProblem = e.details?.code && SHARED_PROBLEM[e.details.code] ? e.details.code : 'error';
+  }
+  // Someone else saved: show it, unless this person is typing or has a panel open.
+  window.addEventListener('maa:data', async () => {
+    // An approval may have just arrived: refresh who this person is (a local read).
+    if (state.user) state.user = (await api('GET', '/api/me').catch(() => null))?.user || state.user;
+    const typing = document.activeElement?.matches?.('input, textarea, select');
+    if (!typing && !$('.sheet-back')) render();
+  });
+  render();
+}
+
 // ---------------------------------------------------------------- boot
 
 (async function boot() {
   try { state.config = await api('GET', '/api/config'); } catch { /* use defaults */ }
+  if (SHARED) { await bootShared(); return; }
   if (state.token) {
     try { state.user = (await api('GET', '/api/me')).user; } catch { state.token = null; localSet('maa.token', null); }
   }

@@ -251,7 +251,7 @@ fieldset.pay-options legend + * { clear: both; }
 .tiles { display: grid; gap: .5rem; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
 .tile { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: .55rem .7rem; display: grid; gap: .1rem; }
 .tile span { font-size: .78rem; color: var(--muted); }
-.tile strong { font-size: 1.3rem; font-variant-numeric: tabular-nums; }
+.tile strong { font-size: clamp(1rem, 4.5vw, 1.3rem); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .tile.bad { border-color: var(--danger); }
 .tile.bad strong { color: var(--danger); }
 
